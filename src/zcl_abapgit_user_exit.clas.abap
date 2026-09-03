@@ -20,6 +20,12 @@ CLASS zcl_abapgit_user_exit DEFINITION
     "! Only the human-authored source scripts are tracked, never the
     "! generated .LGX compiled artifacts.
     CONSTANTS c_doctype_lgf TYPE uj_doctype VALUE 'LGF'.
+    "! Object metadata for the serialized script items. Logic scripts are
+    "! TADIR object type ASPR; the rest is hard-coded for the first cut.
+    CONSTANTS c_obj_type  TYPE tadir-object     VALUE 'ASPR'.
+    CONSTANTS c_devclass  TYPE devclass         VALUE 'ZCHORUS_BPC'.
+    CONSTANTS c_srcsystem TYPE tadir-srcsystem  VALUE 'CWD'.
+    CONSTANTS c_origlang  TYPE tadir-masterlang VALUE 'E'.
 
     "! List all .LGF logic scripts for the configured appset/appl and
     "! return them as ready-to-commit abapGit file items.
@@ -125,6 +131,14 @@ CLASS zcl_abapgit_user_exit IMPLEMENTATION.
       ls_file-file-path     = |/{ c_root }/{ to_lower( c_appset ) }/{ to_lower( c_appl ) }/|.
       ls_file-file-filename = to_lower( lv_name ).
       ls_file-file-data     = zcl_abapgit_convert=>string_to_xstring_utf8( lv_content ).
+
+      " Identify the file as a BPC logic-script object so abapGit tracks
+      " it with a proper item (type ASPR), rather than an orphan file.
+      ls_file-item-obj_type  = c_obj_type.
+      ls_file-item-obj_name  = lv_name.
+      ls_file-item-devclass  = c_devclass.
+      ls_file-item-srcsystem = c_srcsystem.
+      ls_file-item-origlang  = c_origlang.
 
       APPEND ls_file TO rt_files.
 
