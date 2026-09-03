@@ -127,9 +127,9 @@ CLASS zcl_abapgit_user_exit IMPLEMENTATION.
 
       CLEAR ls_file.
       " Path drives the folder tree shown in the abapGit repo view:
-      " /<appset>/<app>/logic_scripts/. Lower-cased to match abapGit's
+      " /src/<appset>/<app>/logic_scripts/. Lower-cased to match abapGit's
       " on-disk conventions.
-      ls_file-file-path     = |/{ to_lower( c_appset ) }/{ to_lower( c_appl ) }/{ c_root }/|.
+      ls_file-file-path     = |/src/{ to_lower( c_appset ) }/{ to_lower( c_appl ) }/{ c_root }/|.
       ls_file-file-filename = to_lower( lv_name ).
       ls_file-file-data     = zcl_abapgit_convert=>string_to_xstring_utf8( lv_content ).
 
