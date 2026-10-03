@@ -175,8 +175,12 @@ The screen has filters by status and model, plus a search box.
    The content comes from the same abapGit pull.
 4. Each file then succeeds or fails on its own:
    - A file locked in BPC (`CHECK_DOCUMENT_LOCK`, e.g. open for editing) is
-     skipped. Others are locked, written with `PUT_DOCUMENT` (no compression,
-     no zip splicing, as in bpcIO) and unlocked.
+     skipped. Others are written with `PUT_DOCUMENT` (no compression, no zip
+     splicing, as in bpcIO). bpcGit does not lock them itself: BPC's lock is
+     only the flag `UJF_DOC-LOCK_IND`, `PUT_DOCUMENT` refuses any set flag
+     (also the caller's own, reporting the caller as the locker), and
+     `LOCK_DOCUMENT`/`UNLOCK_DOCUMENT` rewrite the last-change date, time and
+     user (checked in `CL_UJF_FILE_SERVICE_MGR`/`_DAO` on 2026-10-03).
    - Logic scripts: line endings are normalized to CRLF (BPC splits scripts
      at CRLF; files edited elsewhere may use LF), then the script is validated
      with `CL_UJK_SCRIPT_LOGIC=>VALIDATE`, as BPC's script editor does. An

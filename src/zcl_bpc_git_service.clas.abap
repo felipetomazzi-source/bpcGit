@@ -517,7 +517,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DATA lv_content TYPE xstring.
 
     TRY.
-        " Never overwrite a document someone has open for editing
+        " Never overwrite a document whose lock flag is set (e.g. open for editing)
         IF is_file-in_bpc = abap_true.
           lv_locked = io_files->check_document_lock( is_file-docname ).
           IF lv_locked = abap_true.
@@ -550,23 +550,12 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
 
         IF is_file-in_bpc = abap_false.
           ensure_folder( io_files = io_files iv_environment = iv_environment iv_docname = is_file-docname ).
-        ELSE.
-          io_files->lock_document( is_file-docname ).
         ENDIF.
-        TRY.
-            io_files->put_document( i_docname = is_file-docname i_doc_content = lv_content
-                                    i_compression = abap_false i_splice_zip = abap_false ).
-          CLEANUP.
-            IF is_file-in_bpc = abap_true.
-              TRY.
-                  io_files->unlock_document( is_file-docname ).
-                CATCH cx_ujf_file_service_error ##NO_HANDLER.
-              ENDTRY.
-            ENDIF.
-        ENDTRY.
-        IF is_file-in_bpc = abap_true.
-          io_files->unlock_document( is_file-docname ).
-        ENDIF.
+        " No LOCK_DOCUMENT around the write: BPC's lock is only the flag
+        " UJF_DOC-LOCK_IND, and PUT_DOCUMENT refuses any set flag, including
+        " the caller's own. Locking also rewrites the last-change stamp.
+        io_files->put_document( i_docname = is_file-docname i_doc_content = lv_content
+                                i_compression = abap_false i_splice_zip = abap_false ).
       CATCH cx_ujf_file_service_error INTO DATA(lx_file).
         rv_message = lx_file->get_text( ).
     ENDTRY.
