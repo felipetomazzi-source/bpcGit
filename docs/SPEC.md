@@ -24,6 +24,11 @@ including settings and the package's custom/default script representation.
 It is not read through UJF as a physical file. Git-only packages compare against
 an absent BPC side. Existing text limits, access checks and escaping apply.
 
+Version 0.15.2 enables the same Diff action for package links, comparing their
+canonical generated XML from BPC against Git. Link order and stored package
+references/parameters are shown as text changes. Diff remains read-only, with
+the same model-access checks, missing-side behavior and rendering limits.
+
 Text supports UTF-8 and BOM-marked UTF-16, rejecting undecodable/binary content.
 The backend limits each text part to 1 MB; the UI limits combined text to 200,000
 characters and displays at most 2,000 rows, with explicit limit messages. LCS

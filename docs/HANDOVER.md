@@ -7,6 +7,12 @@ its reason.
 
 ## Current update (2026-10-03)
 
+0.15.2 extends Diff to Data Manager package links using the existing generated
+link XML, model access checks and escaped line-by-line renderer.
+Formatter and Diff/scope/history regressions pass. ADT syntax check reports no
+errors (30 existing ABAP Doc warnings). Awaiting user abapGit pull/activation
+and browser verification.
+
 0.15.1 extends Diff to Data Manager packages, comparing generated canonical
 package XML (settings and script representation) against Git without UJF reads
 for generated objects. Package selection enables the existing Diff dialog.

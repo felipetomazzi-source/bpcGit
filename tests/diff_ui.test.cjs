@@ -39,7 +39,7 @@ assert.ok(!rendered.includes('<script>') && !rendered.includes('<img'));
 assert.ok(rendered.includes('&lt;script&gt;') && rendered.includes('&quot;bad&quot;'));
 assert.ok(methods._renderDiff({ gitText: largeA, bpcText: largeB, inGit: true, inBpc: true }).includes('first 2,000 rows'));
 assert.ok(methods._renderDiff({ gitText: 'a'.repeat(200001), bpcText: '' }).includes('too large'));
-for (const kind of ['SCRIPT', 'TRANSFORMATION', 'CONVERSION', 'PACKAGE']) { assert.equal(methods._canDiff({ kind }), true); }
+for (const kind of ['SCRIPT', 'TRANSFORMATION', 'CONVERSION', 'PACKAGE', 'LINK']) { assert.equal(methods._canDiff({ kind }), true); }
 assert.equal(methods._canDiff({ kind: 'WORKBOOK' }), false);
 (async () => {
   const data = { '/workbooks': [{ kind: 'TRANSFORMATION', path: 'M/IMPORT.XLS', name: 'IMPORT.XLS', selected: true }], '/environment': 'ENV' };

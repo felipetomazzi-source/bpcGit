@@ -678,8 +678,8 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   METHOD get_diff.
     DATA(lv_kind) = get_kind( iv_path ).
     IF lv_kind <> c_kind-script AND lv_kind <> c_kind-transformation AND lv_kind <> c_kind-conversion
-        AND lv_kind <> c_kind-package.
-      zcx_abapgit_exception=>raise( 'Diff is available for logic scripts, transformations, conversions and packages' ).
+        AND lv_kind <> c_kind-package AND lv_kind <> c_kind-link.
+      zcx_abapgit_exception=>raise( 'Diff is available for logic scripts, transformations, conversions, packages and package links' ).
     ENDIF.
     DATA(lv_model) = get_model( iv_path ).
     DATA(lt_models) = available_models( iv_environment ).
@@ -718,7 +718,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       ls_part-git_size = xstrlen( lv_git ).
       ls_part-changed = xsdbool( ls_part-in_bpc <> ls_part-in_git OR lv_bpc <> lv_git ).
       DATA(lv_ext) = to_upper( substring_after( val = lv_path sub = '.' occ = -1 ) ).
-      IF lv_ext = 'LGF' OR lv_ext = 'TDM' OR lv_ext = 'CDM' OR lv_kind = c_kind-package.
+      IF lv_ext = 'LGF' OR lv_ext = 'TDM' OR lv_ext = 'CDM' OR lv_kind = c_kind-package OR lv_kind = c_kind-link.
         TRY.
             ls_part-bpc_text = decode_diff_text( lv_bpc ).
             ls_part-git_text = decode_diff_text( lv_git ).
