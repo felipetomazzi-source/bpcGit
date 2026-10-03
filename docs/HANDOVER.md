@@ -10,6 +10,12 @@ its reason.
 0.15.1 extends Diff to Data Manager packages, comparing generated canonical
 package XML (settings and script representation) against Git without UJF reads
 for generated objects. Package selection enables the existing Diff dialog.
+Deployment and browser acceptance passed: abapGit pull/activation reported zero
+changes; Playwright loaded 416 packages and opened AGGR_OPEX_CALC.xml Diff.
+The new-in-BPC package displayed its 782-byte definition as additions, including
+group, description, process chain, user group and individual script lines.
+Diff/scope/history regressions and ADT syntax passed (existing ABAP Doc warnings
+only). No package was modified or committed to the BPC content repository.
 
 Version 0.15.0 adds Diff for one logic script, transformation or conversion.
 POST /diff reads the current Git head and BPC file(s), with environment/model
