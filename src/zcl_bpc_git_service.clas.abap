@@ -116,8 +116,9 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 et_results TYPE ty_restore_results
       RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
     "! True for the statuses whose Git version may be restored: new or
-    "! modified in Git, never synced but different, or deleted in Git.
-    "! Conflicts are refused, like in commit.
+    "! modified in Git, never synced but different, deleted in Git, and -
+    "! discarding the BPC side, which the app warns about - modified or
+    "! deleted in BPC and conflicts.
     CLASS-METHODS is_restorable
       IMPORTING iv_status TYPE string
       RETURNING VALUE(rv_restorable) TYPE abap_bool.
@@ -629,7 +630,10 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     rv_restorable = xsdbool( iv_status = c_status-modified_git
                           OR iv_status = c_status-new_git
                           OR iv_status = c_status-differs
-                          OR iv_status = c_status-deleted_git ).
+                          OR iv_status = c_status-deleted_git
+                          OR iv_status = c_status-modified_bpc
+                          OR iv_status = c_status-deleted_bpc
+                          OR iv_status = c_status-conflict ).
   ENDMETHOD.
 
   METHOD is_committable.

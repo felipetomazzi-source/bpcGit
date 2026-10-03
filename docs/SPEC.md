@@ -189,8 +189,12 @@ The screen has filters by status and model, plus a search box.
    | Differs, never synced | replaces the BPC version with the Git version |
    | Deleted in Git | deletes the file from BPC |
 
-   Conflicts are refused, as in F4. "Differs" can be committed or restored:
-   commit makes BPC win, restore makes Git win.
+   Added 2026-10-03 at the user's request, to discard BPC changes (like
+   `git checkout`): Modified in BPC ("Discard BPC changes"), Conflict ("Take
+   Git version, discard BPC changes") and Deleted in BPC ("Recreate in BPC").
+   The dialog warns in red that the BPC changes are lost. "Select Git changes"
+   still selects only files whose newer version is in Git. "Differs" can be
+   committed or restored: commit makes BPC win, restore makes Git win.
 2. **Restore (n)** shows what will be overwritten or deleted and warns that
    bpcGit keeps no copy of a BPC version that was never committed.
 3. The backend recomputes the statuses from the branch head and refuses if
