@@ -4,7 +4,8 @@
 
 bpcGit is a web app on the BPC system that puts BPC content under Git version
 control in a GitHub repository. It tracks EPM workbooks, logic scripts,
-transformation and conversion files, Data Manager packages and package links.
+transformation and conversion files, Data Manager packages and package links,
+security definitions and business process flow (BPF) template designs.
 
 A user opens the app, connects it to a GitHub repository, picks the BPC
 environment to track, and then commits workbooks to Git or restores them from Git.
@@ -23,7 +24,7 @@ environment to track, and then commits workbooks to Git or restores them from Gi
 
 ### Out of scope (v1)
 
-- Data Manager data files, dimensions, BPF templates and other BPC content
+- Data Manager data files, dimensions, BPF instances and other BPC content
   not listed in section 3.
 - Private publications (`PRIVATEPUBLICATIONS\<user>\`) and temporary files.
 - Branch management, merging and conflict resolution inside the app. These
@@ -562,3 +563,78 @@ Version 0.12.1 decodes percent-encoded security filenames for display and name
 search (spaces and UTF-8 characters). Repository paths and action identities
 remain encoded. Other file names are literal; malformed encodings fall back
 to their original text instead of breaking the overview.
+
+## Business process flows (0.13.0)
+
+BPF tracks BPC 10 template designs, not process execution. Kind BPF appears as
+Business process flows in the load selector, with an optional controlling-model
+scope. All objects includes BPF when the user has Manage BPFs (task P0043).
+The environment context and this permission are checked for listing, commit,
+history and restore; explicit unauthorized BPF loads fail. Names are decoded
+for display/search while encoded repository identities are retained.
+
+ZCL_BPC_GIT_BPF uses CL_UJB_10_TMPL_MGR and CL_UJB_10_TMPL_HDR. One generated,
+indented schema-version-1 ABAP XML file represents each technical template name:
+<MODEL>/BPF/<escaped-technical-name>.xml. It reads the edit version first, then
+the active version, then the latest remaining version. Each overview hashes the
+canonical definition, using the existing per-object sync state and Git history.
+BPF XML is a generated object, never written into the UJF document service.
+
+The design includes controlling model, instruction, classification, identity
+dimensions, ordered activities, driving dimensions/member selectors, owner and
+reviewer properties, reopening/review rules and deadline settings. Activities
+are sorted by order and member selectors by their portable fields. Technical
+template names identify objects; local version labels, physical IDs/GUIDs,
+environment IDs, logical systems, activation/editing/validation state, timestamps,
+localized dimension/member captions, owners/subscribers and instance metadata
+are excluded. Text is read in the SAP session language; multilingual template
+captions/version-label transport is outside this release.
+
+Performer/reviewer workspace links are exported separately by activity order,
+role, workspace name and resource type. Workspace contents are not versioned.
+Restore prefers the matching workspace already attached to that local activity;
+otherwise its name/type must resolve uniquely in the target environment. Missing
+or ambiguous dependencies fail before saving. An existing target model is
+required; restoring into a different controlling model under the same technical
+name is refused. Native edit-version creation can copy local activity workspaces;
+unchanged links reuse those copies. This avoids exporting source-system GUIDs
+and avoids ambiguity between deployed and editable workspace copies.
+
+Restore validates schema/path/identity, rejects runtime IDs and assignments,
+checks unique activity orders and rejects legacy actions/substeps unsupported
+by the BPC 10 save API. It holds the template header write lock, rechecks editing
+state and refuses open templates (even one's own), deployed/nonlocal edit
+versions or edit versions with instances. A new template is created as Git draft;
+an existing template gets or updates its native editable version. Nested
+environment IDs are reconstructed locally, and existing local access assignments
+and version labels are preserved. Native APIs generate the remaining IDs.
+No activation, instance modification, archive or template deletion API is called.
+Git deletion restores are refused; delete/archive templates deliberately in BPC.
+
+After saving, the provider reads and canonicalizes the draft and requires an
+exact match to the requested Git definition; it also verifies the existing active
+version is unchanged. Errors use the existing restore rollback and do not record
+success. Editing locks are released. Native audit/resource side effects may extend
+beyond the database transaction; no broader atomicity is claimed. The UI explains
+that a restored draft must be validated and deployed in BPC. History restore uses
+the same draft/dependency/permission guards and preserves the current Git baseline.
+
+Validation: provider syntax through ADT in an existing class context (class-name
+substitution only); service through ADT with signature stand-ins for this new,
+not-yet-installed provider; HTTP directly. Scoped UI tests cover BPF model scope,
+labels, decoded names and encoded identities; history tests cover BPF restore
+payload and draft warning. Formatting, JS/JSON/XML checks pass. Full activation
+and BPC write acceptance require the user's abapGit pull and browser test:
+
+1. Select Business process flows, a model and Load. Confirm edit versions take
+   precedence, template names/statuses display correctly, and All objects works.
+2. Commit a representative BPF. Refresh and confirm Unchanged. Make an activity
+   instruction/rule change in BPC, save and close the editor, then refresh.
+3. Restore it from Git, inspect the editable BPC version, and confirm the design
+   was restored and the overview is Unchanged. Validate/deploy manually if wanted.
+4. Confirm active versions, running instances and local access assignments stay
+   intact. Test a deployed-only template and a template already containing a draft.
+5. Restore a historical version; confirm its design appears as a draft and can
+   be committed back. Test new-template restore in another environment with the
+   model/workspaces available, plus missing workspace, open editor and Git deletion
+   failures. Failed restores must not record a synchronized baseline.

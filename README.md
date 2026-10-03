@@ -2,7 +2,8 @@
 
 Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
-package links. The app is a UI5 BSP application, installed with abapGit into
+package links, security definitions and BPF template designs. The app is a UI5
+BSP application, installed with abapGit into
 package `ZBPC_GIT` on the development system.
 
 - Specification: [docs/SPEC.md](docs/SPEC.md)
@@ -145,3 +146,16 @@ session. The implementation has ADT syntax and local UI checks; SAP/browser
 acceptance of security writes is still pending. Native security APIs update
 roles/caches as well as database definitions, so ordinary document locks do not
 apply and cross-system role side effects cannot be promised atomic rollback.
+
+## Business process flows
+
+Choose **Business process flows**, optionally select its controlling model, then
+Load. Commit and History use one XML design per template under `<MODEL>/BPF/`.
+Manage BPFs permission is required. Editable versions take precedence over deployed
+versions. Restore updates an editable draft; validate and deploy it in BPC.
+Running instances, deployed versions and local access assignments remain intact.
+
+Activity workspace links resolve by local name/type; the workspace contents must
+already exist in the target environment. Close the BPF editor before restoring.
+Template deletion/archive stays in BPC. See the BPF section of the specification
+for limitations and the SAP acceptance checklist.

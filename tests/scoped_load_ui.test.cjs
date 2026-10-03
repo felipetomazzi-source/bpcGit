@@ -108,6 +108,29 @@ const response = { branch: 'main', branchFound: true, commit: 'a'.repeat(40),
     assert.equal(row.location, 'SECURITY');
     assert.equal(row.committable, false);
   }
+  f = fixture();
+  f.data.loadScope = { kind: 'BPF', model: 'MODEL' };
+  f.instance.onLoadScopeChange();
+  assert.equal(f.data.loadScope.model, 'MODEL', 'BPF retains its controlling model scope');
+  f.instance.onLoadWorkbooks();
+  assert.equal(f.pending[0].params.kind, 'BPF');
+  assert.equal(f.pending[0].params.model, 'MODEL');
+  f.pending[0].resolve(response); await tick();
+  f.instance.onRefreshWorkbooks();
+  assert.equal(f.pending[1].params.kind, 'BPF');
+  f.pending[1].resolve(response); await tick();
+  const bpfPath = 'MODEL/BPF/CONNECTION%20REVENUE.xml';
+  const bpfRow = methods._toRow({ path: bpfPath, kind: 'BPF', model: 'MODEL', status: 'MODIFIED_BPC' });
+  assert.equal(bpfRow.name, 'CONNECTION REVENUE.xml');
+  assert.equal(bpfRow.path, bpfPath);
+  assert.equal(bpfRow.type, 'BPF');
+  assert.equal(bpfRow.typeText, 'Business process flow');
+  assert.equal(bpfRow.location, 'BPF');
+  assert.equal(bpfRow.committable, true);
+  assert.equal(bpfRow.restorable, true);
+  const deletedBpf = methods._toRow({ path: bpfPath, kind: 'BPF', model: 'MODEL', status: 'DELETED_GIT' });
+  assert.equal(deletedBpf.restorable, false, 'Git deletion cannot delete a BPF or its instances');
+  assert.equal(deletedBpf.gitChange, false);
   console.log('Scoped loading UI regression checks passed');
   for (const [file, display] of [['Capital%20Contribution.xml', 'Capital Contribution.xml'],
     ['Caf%C3%A9.xml', 'Café.xml'], ['Rate%2520.xml', 'Rate%20.xml'], ['Bad%ZZ.xml', 'Bad%ZZ.xml']]) {

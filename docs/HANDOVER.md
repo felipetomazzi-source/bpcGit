@@ -33,6 +33,17 @@ read/create/update APIs; deletion and default-profile restore are refused. ADT
 checked the provider in an existing class context, HTTP directly and service with
 new-provider signature stand-ins. UI/history checks pass. Security write acceptance
 must be tested after user pull/activation; no SAP objects/data were written by ADT.
+Version 0.13.0 adds BPF template design version control through ZCL_BPC_GIT_BPF.
+BPF is scoped by controlling model and requires Manage BPFs (P0043). Native XML
+excludes runtime IDs, local access assignments and version labels. Workspace
+links use local names/types; their contents remain outside Git. Restore creates
+or updates an editable draft, verifies it against Git and preserves the deployed
+version. Native edit-version workspace copies are reused for unchanged links.
+Open/nonlocal/instance-bearing drafts, missing/ambiguous dependencies and Git
+restore deletion are refused. UI scope/name/history regressions and syntax checks
+pass (provider in existing class context, service with provider signature stand-ins,
+HTTP directly). User must pull/activate via abapGit and test draft restore, instance
+preservation and cross-environment dependencies. No SAP writes were made via ADT.
 The sections below preserve the earlier session handover; use SPEC.md and
 AGENTS.md for current behavior and the authorized commit/push workflow.
 

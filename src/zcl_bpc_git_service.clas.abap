@@ -1,7 +1,7 @@
 "! bpcGit business logic: environments, the repository setup of an
 "! environment (table ZBPC_GIT_REPO) and the Git status of its EPM workbooks,
 "! logic scripts, transformation and conversion files, Data Manager packages
-"! and package links (docs/SPEC.md sections 3 and 6).
+"! package links, security definitions and BPF designs (docs/SPEC.md).
 CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES ty_environments TYPE STANDARD TABLE OF uj_appset_id WITH DEFAULT KEY.
@@ -29,7 +29,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         git_sha1    TYPE string,
         lstmod_date TYPE uj_lstmod_date,
         lstmod_time TYPE uj_lstmod_time,
-        "! Packages and links are no BPC documents: bpcGit generates their file
+        "! Definitions are generated XML rather than BPC file-service documents
         generated   TYPE abap_bool,
         content     TYPE xstring,
         members     TYPE string_table,
@@ -54,6 +54,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS:
       BEGIN OF c_kind,
         workbook       TYPE string VALUE 'WORKBOOK',
+        bpf            TYPE string VALUE 'BPF',
         team           TYPE string VALUE 'TEAM',
         taskprofile    TYPE string VALUE 'TASKPROFILE',
         dataprofile    TYPE string VALUE 'DATAPROFILE',
@@ -168,7 +169,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         lstmod_time TYPE uj_lstmod_time,
         lstmod_user TYPE string,
         size        TYPE i,
-        "! Packages and links are no BPC documents: bpcGit generates their file
+        "! Definitions are generated XML rather than BPC file-service documents
         generated   TYPE abap_bool,
         content     TYPE xstring,
       END OF ty_bpc_workbook,
@@ -247,7 +248,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_environment TYPE uj_appset_id
                 iv_kind TYPE string OPTIONAL iv_model TYPE string OPTIONAL
       RETURNING VALUE(rt_workbooks) TYPE ty_bpc_workbooks
-      RAISING cx_uj_static_check.
+      RAISING cx_uj_static_check zcx_abapgit_exception.
     "! Kind (c_kind) of a repository path, initial if bpcGit does not track it:
     "!   <model>/EEXCEL/.../<name>.<workbook type>                   workbook
     "!   ADMINAPP/<model>/<name>.LGF                                 logic script
@@ -492,10 +493,12 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     ENDLOOP.
 
     DATA(lv_security_allowed) = zcl_bpc_git_security=>can_read( ).
+    DATA(lv_bpf_allowed) = zcl_bpc_git_bpf=>can_read( ).
     " Files only in Git; untracked ones (README.md) are not ours
     LOOP AT ls_branch-files INTO ls_git.
       DATA(lv_kind) = get_kind( ls_git-path ).
-      IF ls_git-path CP 'SECURITY/*' AND lv_security_allowed = abap_false.
+      IF ( ls_git-path CP 'SECURITY/*' AND lv_security_allowed = abap_false )
+          OR ( lv_kind = c_kind-bpf AND lv_bpf_allowed = abap_false ).
         CONTINUE.
       ENDIF.
       IF lv_kind IS INITIAL OR matches_scope( iv_path = ls_git-path iv_kind = iv_kind ) = abap_false
@@ -507,7 +510,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       APPEND VALUE #(
         path    = ls_git-path
         kind    = lv_kind
-        generated = xsdbool( ls_git-path CP 'SECURITY/*' )
+        generated = xsdbool( ls_git-path CP 'SECURITY/*' OR lv_kind = c_kind-bpf )
         model   = get_model( ls_git-path )
         team    = get_team( ls_git-path )
         docname = lv_docname
@@ -746,7 +749,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         ELSE.
           ls_snapshot_file-status = c_status-unchanged.
         ENDIF.
-        IF lv_snapshot_path CP 'SECURITY/*'.
+        IF lv_snapshot_path CP 'SECURITY/*' OR get_kind( lv_snapshot_path ) = c_kind-bpf.
           ls_snapshot_file-generated = abap_true.
         ENDIF.
         IF ls_snapshot_file-status <> c_status-unchanged.
@@ -870,6 +873,14 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DATA lv_locked TYPE uj_flg.
     DATA lv_content TYPE xstring.
 
+    IF is_file-kind = c_kind-bpf.
+      DATA(lv_bpf_delete) = xsdbool( is_file-status = c_status-deleted_git ).
+      DATA(lv_bpf_xml) = COND xstring( WHEN lv_bpf_delete = abap_true THEN is_file-content
+        ELSE io_remote->get_content( is_file-git_sha1 ) ).
+      rv_message = zcl_bpc_git_bpf=>restore( iv_environment = iv_environment iv_path = is_file-path
+        iv_xml = lv_bpf_xml iv_delete = lv_bpf_delete ).
+      RETURN.
+    ENDIF.
     IF is_file-path CP 'SECURITY/*'.
       DATA(lv_security_delete) = xsdbool( is_file-status = c_status-deleted_git ).
       DATA(lv_security_xml) = COND xstring( WHEN lv_security_delete = abap_true THEN is_file-content
@@ -1059,6 +1070,24 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       ENDIF.
       DELETE lt_models WHERE table_line <> iv_model.
     ENDIF.
+    IF iv_kind IS INITIAL OR iv_kind = c_kind-bpf.
+      IF zcl_bpc_git_bpf=>can_read( ) = abap_true.
+        DATA(lt_bpf) = zcl_bpc_git_bpf=>list( iv_environment = iv_environment iv_model = iv_model ).
+        LOOP AT lt_bpf INTO DATA(ls_bpf).
+          IF NOT line_exists( lt_models[ table_line = ls_bpf-model ] ).
+            CONTINUE.
+          ENDIF.
+          INSERT VALUE #( path = ls_bpf-path kind = c_kind-bpf model = ls_bpf-model
+            docname = to_docname( iv_environment = iv_environment iv_path = ls_bpf-path )
+            generated = abap_true content = ls_bpf-content size = xstrlen( ls_bpf-content ) ) INTO TABLE rt_workbooks.
+        ENDLOOP.
+      ELSEIF iv_kind = c_kind-bpf.
+        RAISE EXCEPTION TYPE cx_uj_no_auth.
+      ENDIF.
+    ENDIF.
+    IF iv_kind = c_kind-bpf.
+      RETURN.
+    ENDIF.
     DATA(lo_files) = get_file_service( iv_environment ).
     LOOP AT lt_models INTO DATA(lv_model).
       " Folders to list; get_kind decides what in them is tracked. Team folders
@@ -1247,6 +1276,10 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_kind.
+    rv_kind = zcl_bpc_git_bpf=>get_kind( iv_path ).
+    IF rv_kind IS NOT INITIAL.
+      RETURN.
+    ENDIF.
     IF iv_path CP 'SECURITY/*'.
       rv_kind = zcl_bpc_git_security=>get_kind( iv_path ).
       RETURN.
