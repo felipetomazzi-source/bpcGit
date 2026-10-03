@@ -5,6 +5,15 @@ that continues the work. Read this first, then `docs/SPEC.md`, the
 functional spec. The spec is kept up to date and records every decision with
 its reason.
 
+## Current update (2026-10-03)
+
+Packages and links are implemented; SAP acceptance is pending. Version 0.9.3
+groups transformation/conversion workbooks with their definitions into one
+overview row and one commit/restore selection. Pair restore is transactional
+and verifies the written Data Manager content. History is still not started.
+The sections below preserve the earlier session handover; use SPEC.md and
+AGENTS.md for current behavior and the authorized commit/push workflow.
+
 ## 1. What bpcGit is
 
 bpcGit is a web app on an SAP BPC 10.1 (NetWeaver 7.52) system. It keeps BPC

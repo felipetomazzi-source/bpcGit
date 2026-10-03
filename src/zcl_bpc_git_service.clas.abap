@@ -32,6 +32,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         "! Packages and links are no BPC documents: bpcGit generates their file
         generated   TYPE abap_bool,
         content     TYPE xstring,
+        members     TYPE string_table,
       END OF ty_workbook,
       ty_workbooks TYPE STANDARD TABLE OF ty_workbook WITH DEFAULT KEY.
     TYPES:
@@ -91,6 +92,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS get_overview
       IMPORTING iv_environment TYPE uj_appset_id
                 io_remote TYPE REF TO zcl_bpc_git_remote
+                iv_individual TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rs_overview) TYPE ty_overview
       RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
     "! Commits the BPC version of the given workbooks in one commit (F4) and
@@ -232,6 +234,15 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     "!   <model>/DATAMANAGER/TRANSFORMATIONFILES/.../<name>.TDM|XLS  transformation
     "!   <model>/DATAMANAGER/CONVERSIONFILES/.../<name>.CDM|XLS      conversion
     "! and the same below <model>/TEAM FILES/<team>/ instead of <model>/.
+    METHODS logical_path
+      IMPORTING iv_path TYPE string it_files TYPE ty_workbooks
+      RETURNING VALUE(rv_path) TYPE string.
+    METHODS group_files
+      IMPORTING it_files TYPE ty_workbooks
+      RETURNING VALUE(rt_files) TYPE ty_workbooks.
+    METHODS expand_selection
+      IMPORTING it_paths TYPE string_table it_files TYPE ty_workbooks iv_restore TYPE abap_bool
+      EXPORTING et_paths TYPE string_table ev_error TYPE string.
     METHODS get_kind
       IMPORTING iv_path TYPE string
       RETURNING VALUE(rv_kind) TYPE string.
@@ -455,6 +466,9 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         TO rs_overview-workbooks.
     ENDLOOP.
     SORT rs_overview-workbooks BY path.
+    IF iv_individual = abap_false.
+      rs_overview-workbooks = group_files( rs_overview-workbooks ).
+    ENDIF.
   ENDMETHOD.
 
   METHOD commit_workbooks.
@@ -475,7 +489,8 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
 
     " Statuses as of now, from the same head the commit builds on
     DATA(ls_config) = get_config( iv_environment ).
-    DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote ).
+    DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote
+                                      iv_individual = abap_true ).
     IF ls_overview-branch_found = abap_false.
       ev_error = |Branch { ls_config-branch } does not exist in the repository yet. | &&
                  |Create it on the Git host first, for example by adding a README file.|.
@@ -487,18 +502,15 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       RETURN.
     ENDIF.
 
+    DATA lt_paths TYPE string_table.
+    expand_selection( EXPORTING it_paths = it_paths it_files = ls_overview-workbooks iv_restore = abap_false
+                       IMPORTING et_paths = lt_paths ev_error = ev_error ).
+    IF ev_error IS NOT INITIAL.
+      RETURN.
+    ENDIF.
     DATA(lo_files) = get_file_service( iv_environment ).
-    LOOP AT it_paths INTO DATA(lv_path).
+    LOOP AT lt_paths INTO DATA(lv_path).
       READ TABLE ls_overview-workbooks INTO DATA(ls_workbook) WITH KEY path = lv_path.
-      IF sy-subrc <> 0.
-        ev_error = |{ lv_path } is no longer in BPC or Git. Reload the list.|.
-        RETURN.
-      ENDIF.
-      IF is_committable( ls_workbook-status ) = abap_false.
-        ev_error = |{ lv_path } cannot be committed in its current status ({ ls_workbook-status }). Reload the list.|.
-        RETURN.
-      ENDIF.
-
       IF ls_workbook-status = c_status-deleted_bpc.
         APPEND VALUE #( path = lv_path delete = abap_true ) TO lt_changes.
         APPEND ls_workbook-docname TO lt_unsynced.
@@ -550,7 +562,8 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
 
     " Statuses as of now, from the head whose content is restored
     DATA(ls_config) = get_config( iv_environment ).
-    DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote ).
+    DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote
+                                      iv_individual = abap_true ).
     IF ls_overview-branch_found = abap_false.
       ev_error = |Branch { ls_config-branch } does not exist in the repository.|.
       RETURN.
@@ -561,61 +574,95 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    DATA lt_files TYPE ty_workbooks.
-    LOOP AT it_paths INTO DATA(lv_path).
-      READ TABLE ls_overview-workbooks INTO DATA(ls_file) WITH KEY path = lv_path.
-      IF sy-subrc <> 0.
-        ev_error = |{ lv_path } is no longer in BPC or Git. Reload the list.|.
-        RETURN.
-      ENDIF.
-      IF is_restorable( ls_file-status ) = abap_false.
-        ev_error = |{ lv_path } cannot be restored in its current status ({ ls_file-status }). Reload the list.|.
-        RETURN.
-      ENDIF.
-      APPEND ls_file TO lt_files.
-    ENDLOOP.
-
-    " Saving logic scripts needs the same task as BPC's script editor
-    IF line_exists( lt_files[ kind = c_kind-script ] ).
-      cl_uj_context=>get_cur_context( )->check_task_access( i_task_name = uje0_cs_task_id-p0008 ).
+    DATA lt_paths TYPE string_table.
+    expand_selection( EXPORTING it_paths = it_paths it_files = ls_overview-workbooks iv_restore = abap_true
+                       IMPORTING et_paths = lt_paths ev_error = ev_error ).
+    IF ev_error IS NOT INITIAL.
+      RETURN.
     ENDIF.
-
+    DATA(lt_groups) = group_files( ls_overview-workbooks ).
     DATA(lo_files) = get_file_service( iv_environment ).
-    LOOP AT lt_files INTO ls_file.
-      DATA(lv_message) = restore_file( io_files = lo_files io_remote = io_remote
-                                       iv_environment = iv_environment is_file = ls_file ).
-      APPEND VALUE #( path = ls_file-path ok = xsdbool( lv_message IS INITIAL ) message = lv_message )
-        TO et_results.
-      IF lv_message IS NOT INITIAL.
-        " BPC's package APIs do not commit; undo what this file wrote
-        ROLLBACK WORK.
+    IF line_exists( ls_overview-workbooks[ kind = c_kind-script ] ).
+      LOOP AT lt_paths INTO DATA(lv_check_path).
+        READ TABLE ls_overview-workbooks INTO DATA(ls_check) WITH KEY path = lv_check_path.
+        IF ls_check-kind = c_kind-script.
+          cl_uj_context=>get_cur_context( )->check_task_access( i_task_name = uje0_cs_task_id-p0008 ).
+          EXIT.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+    DATA lt_done TYPE string_table.
+    LOOP AT it_paths INTO DATA(lv_path).
+      DATA(lv_logical) = logical_path( iv_path = lv_path it_files = ls_overview-workbooks ).
+      IF line_exists( lt_done[ table_line = lv_logical ] ).
         CONTINUE.
       ENDIF.
-
-      " Restored: BPC now holds the Git version
-      IF ls_file-status = c_status-deleted_git.
-        DELETE FROM zbpc_git_state WHERE appset = @iv_environment AND docname = @ls_file-docname.
+      APPEND lv_logical TO lt_done.
+      READ TABLE lt_groups INTO DATA(ls_group) WITH KEY path = lv_logical.
+      DATA(lv_message) = ``.
+      TRY.
+          " Check every affected lock before writing either member of a pair.
+          LOOP AT ls_group-members INTO DATA(lv_member).
+            READ TABLE ls_overview-workbooks INTO DATA(ls_file) WITH KEY path = lv_member.
+            IF ls_file-status = c_status-unchanged.
+              CONTINUE.
+            ENDIF.
+            IF ls_file-in_bpc = abap_true AND ls_file-generated = abap_false.
+              IF lo_files->check_document_lock( ls_file-docname ) = abap_true.
+                lv_message = |{ lv_member } is locked in BPC. Close it and try again.|.
+                EXIT.
+              ENDIF.
+            ENDIF.
+          ENDLOOP.
+          IF lv_message IS INITIAL.
+            LOOP AT ls_group-members INTO lv_member.
+              READ TABLE ls_overview-workbooks INTO ls_file WITH KEY path = lv_member.
+              IF ls_file-status = c_status-unchanged.
+                CONTINUE.
+              ENDIF.
+              lv_message = restore_file( io_files = lo_files io_remote = io_remote
+                                         iv_environment = iv_environment is_file = ls_file ).
+              IF lv_message IS NOT INITIAL.
+                lv_message = |{ lv_member }: { lv_message }|.
+                EXIT.
+              ENDIF.
+              IF ls_file-status = c_status-deleted_git.
+                DELETE FROM zbpc_git_state WHERE appset = @iv_environment AND docname = @ls_file-docname.
+              ELSE.
+                DATA ls_attributes TYPE ujf_doc.
+                CLEAR ls_attributes.
+                IF ls_file-generated = abap_false AND ls_file-kind <> c_kind-package AND ls_file-kind <> c_kind-link.
+                  IF ls_file-kind = c_kind-transformation OR ls_file-kind = c_kind-conversion.
+                    DATA lv_actual TYPE xstring.
+                    lo_files->get_document( EXPORTING i_docname = ls_file-docname i_retzip = abap_false
+                                            IMPORTING e_document_content = lv_actual ).
+                    IF zcl_bpc_git_remote=>blob_sha1( lv_actual ) <> ls_file-git_sha1.
+                      lv_message = |{ lv_member }: BPC content does not match Git after restore.|.
+                      EXIT.
+                    ENDIF.
+                  ENDIF.
+                  lo_files->get_document_attributes( EXPORTING i_docname = ls_file-docname
+                                                     IMPORTING es_document_attributes = ls_attributes ).
+                ENDIF.
+                DATA(ls_state) = VALUE zbpc_git_state( appset = iv_environment docname = ls_file-docname
+                  blob_sha1 = ls_file-git_sha1 commit_sha1 = ls_overview-commit
+                  lstmod_date = ls_attributes-lstmod_date lstmod_time = ls_attributes-lstmod_time synced_by = sy-uname ).
+                GET TIME STAMP FIELD ls_state-synced_at.
+                MODIFY zbpc_git_state FROM ls_state.
+              ENDIF.
+            ENDLOOP.
+          ENDIF.
+        CATCH cx_root INTO DATA(lx_restore).
+          lv_message = lx_restore->get_text( ).
+      ENDTRY.
+      IF lv_message IS INITIAL.
+        COMMIT WORK.
       ELSE.
-        DATA ls_attributes TYPE ujf_doc.
-        CLEAR ls_attributes.
-        IF ls_file-generated = abap_false AND ls_file-kind <> c_kind-package AND ls_file-kind <> c_kind-link.
-          lo_files->get_document_attributes( EXPORTING i_docname = ls_file-docname
-                                             IMPORTING es_document_attributes = ls_attributes ).
-        ENDIF.
-        DATA ls_state TYPE zbpc_git_state.
-        ls_state = VALUE #( appset      = iv_environment
-                            docname     = ls_file-docname
-                            blob_sha1   = ls_file-git_sha1
-                            commit_sha1 = ls_overview-commit
-                            lstmod_date = ls_attributes-lstmod_date
-                            lstmod_time = ls_attributes-lstmod_time
-                            synced_by   = sy-uname ).
-        GET TIME STAMP FIELD ls_state-synced_at.
-        MODIFY zbpc_git_state FROM ls_state.
+        " Workbook, definition, and sync records succeed or roll back together.
+        ROLLBACK WORK.
       ENDIF.
-      COMMIT WORK.
+      APPEND VALUE #( path = lv_logical ok = xsdbool( lv_message IS INITIAL ) message = lv_message ) TO et_results.
     ENDLOOP.
-    COMMIT WORK.
   ENDMETHOD.
 
   METHOD restore_file.
@@ -836,6 +883,110 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
                      CHANGING ct_workbooks = rt_workbooks ).
       list_links( EXPORTING iv_environment = iv_environment iv_model = lv_model
                   CHANGING ct_workbooks = rt_workbooks ).
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD logical_path.
+    rv_path = iv_path.
+    DATA(lv_kind) = get_kind( iv_path ).
+    IF lv_kind <> c_kind-transformation AND lv_kind <> c_kind-conversion.
+      RETURN.
+    ENDIF.
+    DATA(lv_ext) = to_upper( substring_after( val = iv_path sub = '.' occ = -1 ) ).
+    IF lv_ext <> 'TDM' AND lv_ext <> 'CDM'.
+      RETURN.
+    ENDIF.
+    DATA(lv_stem) = substring_before( val = iv_path sub = '.' occ = -1 ).
+    DATA(lv_xls) = lv_stem && '.XLS'.
+    DATA(lv_xlsx) = lv_stem && '.XLSX'.
+    IF line_exists( it_files[ path = lv_xls ] ).
+      rv_path = lv_xls.
+    ELSEIF line_exists( it_files[ path = lv_xlsx ] ).
+      rv_path = lv_xlsx.
+    ENDIF.
+    " Keep an orphan definition visible when no workbook exists on either side.
+  ENDMETHOD.
+
+  METHOD group_files.
+    LOOP AT it_files INTO DATA(ls_file).
+      DATA(lv_path) = logical_path( iv_path = ls_file-path it_files = it_files ).
+      READ TABLE rt_files ASSIGNING FIELD-SYMBOL(<ls_group>) WITH KEY path = lv_path.
+      IF sy-subrc <> 0.
+        READ TABLE it_files INTO DATA(ls_primary) WITH KEY path = lv_path.
+        APPEND ls_primary TO rt_files ASSIGNING <ls_group>.
+        CLEAR <ls_group>-members.
+      ENDIF.
+      APPEND ls_file-path TO <ls_group>-members.
+    ENDLOOP.
+    LOOP AT rt_files ASSIGNING <ls_group>.
+      DATA(lv_bpc) = abap_false.
+      DATA(lv_git) = abap_false.
+      DATA(lv_differs) = abap_false.
+      DATA(lv_first) = ``.
+      DATA(lv_mixed) = abap_false.
+      DATA(lv_unchanged) = abap_false.
+      LOOP AT <ls_group>-members INTO DATA(lv_member).
+        READ TABLE it_files INTO ls_file WITH KEY path = lv_member.
+        IF ls_file-status = c_status-unchanged.
+          lv_unchanged = abap_true.
+          CONTINUE.
+        ENDIF.
+        IF lv_first IS INITIAL.
+          lv_first = ls_file-status.
+        ELSEIF lv_first <> ls_file-status.
+          lv_mixed = abap_true.
+        ENDIF.
+        CASE ls_file-status.
+          WHEN c_status-modified_bpc OR c_status-new_bpc OR c_status-deleted_bpc.
+            lv_bpc = abap_true.
+          WHEN c_status-modified_git OR c_status-new_git OR c_status-deleted_git.
+            lv_git = abap_true.
+          WHEN c_status-conflict.
+            lv_bpc = abap_true.
+            lv_git = abap_true.
+          WHEN c_status-differs.
+            lv_differs = abap_true.
+        ENDCASE.
+      ENDLOOP.
+      <ls_group>-status = COND #( WHEN lv_bpc = abap_true AND lv_git = abap_true THEN c_status-conflict
+        WHEN lv_differs = abap_true AND lv_git = abap_true THEN c_status-conflict
+        WHEN lv_differs = abap_true THEN c_status-differs
+        WHEN lv_first IS INITIAL THEN c_status-unchanged
+        WHEN lv_mixed = abap_false AND lv_unchanged = abap_false THEN lv_first
+        WHEN lv_bpc = abap_true THEN c_status-modified_bpc ELSE c_status-modified_git ).
+    ENDLOOP.
+    SORT rt_files BY path.
+  ENDMETHOD.
+
+  METHOD expand_selection.
+    CLEAR: et_paths, ev_error.
+    DATA(lt_groups) = group_files( it_files ).
+    LOOP AT it_paths INTO DATA(lv_path).
+      DATA(lv_logical) = logical_path( iv_path = lv_path it_files = it_files ).
+      READ TABLE lt_groups INTO DATA(ls_group) WITH KEY path = lv_logical.
+      IF sy-subrc <> 0.
+        ev_error = |{ lv_path } is no longer in BPC or Git. Reload the list.|.
+        RETURN.
+      ENDIF.
+      DATA(lv_allowed) = COND abap_bool( WHEN iv_restore = abap_true THEN is_restorable( ls_group-status )
+                                        ELSE is_committable( ls_group-status ) ).
+      IF lv_allowed = abap_false.
+        ev_error = |{ lv_logical } cannot be processed in its current status ({ ls_group-status }). Reload the list.|.
+        RETURN.
+      ENDIF.
+      LOOP AT ls_group-members INTO DATA(lv_member).
+        READ TABLE it_files INTO DATA(ls_file) WITH KEY path = lv_member.
+        IF ls_file-status = c_status-unchanged OR line_exists( et_paths[ table_line = lv_member ] ).
+          CONTINUE.
+        ENDIF.
+        lv_allowed = COND #( WHEN iv_restore = abap_true THEN is_restorable( ls_file-status )
+                             ELSE is_committable( ls_file-status ) ).
+        IF lv_allowed = abap_false.
+          ev_error = |{ lv_logical }: its companion cannot be processed ({ ls_file-status }). Reload the list.|.
+          RETURN.
+        ENDIF.
+        APPEND lv_member TO et_paths.
+      ENDLOOP.
     ENDLOOP.
   ENDMETHOD.
 

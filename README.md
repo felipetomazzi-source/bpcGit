@@ -65,3 +65,7 @@ After deployment through abapGit, check package and link listing and Type
 filters, commit representative XML, restore an edited script/link in BPC,
 and confirm a second refresh shows Unchanged. Also test a team package and
 a package using its chain's default script. SAP/browser acceptance is pending.
+
+Transformation and conversion workbooks each appear once in the overview.
+Their status, commit, and restore include the paired definition automatically.
+A restore succeeds for the pair together; a failure rolls back the pair.

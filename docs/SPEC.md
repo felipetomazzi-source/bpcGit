@@ -94,9 +94,16 @@ Added on 2026-10-03, following bpcIO (`c_dm_folder`, `c_transformation_folder`,
   `INSTALLATION` on dev). Subfolders such as `BACKUP` are included (the
   overview hides them by default, as for workbooks).
 - The `.XLS` is the Excel file the definition is maintained in; the
-  `.TDM`/`.CDM` is the processed definition Data Manager runs. Both are
-  tracked as separate files with the same statuses, commit and restore, so
-  they should be committed and restored together.
+  `.TDM`/`.CDM` is the processed definition Data Manager runs. Both remain
+  separate files in Git, but the overview shows one workbook row.
+  Its status considers both files, and commit/restore automatically handles
+  both. A change in either member changes the row; changes on opposite sides
+  are a conflict. Partial additions/deletions show as modifications.
+  Restore checks affected locks before writing and rolls back both files and
+  their sync records if either fails. It verifies the restored Data Manager
+  content before reporting success. Definitions without a workbook on either
+  side remain visible so they can still be managed. If both `.XLS` and `.XLSX`
+  exist with the same stem, the definition belongs to `.XLS`.
 - Files without an extension (one on dev,
   `AGGR_PROJECT\...\CONVERSIONFILES\CONV_RESTORE_AGGR_PROJECT`) are not
   tracked: Git paths are recognised by their extension.
