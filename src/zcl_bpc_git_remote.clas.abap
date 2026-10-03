@@ -78,6 +78,11 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_branch TYPE csequence
       RETURNING VALUE(rs_content) TYPE ty_branch_content
       RAISING zcx_abapgit_exception.
+    "! Content of a file at the head that read_branch returned.
+    METHODS get_content
+      IMPORTING iv_path TYPE string
+      RETURNING VALUE(rv_data) TYPE xstring
+      RAISING zcx_abapgit_exception.
     "! Adds, updates and deletes files in one commit on top of the head that
     "! read_branch returned, and pushes it. Returns the new commit. The push
     "! fails if the branch has moved since, so nothing is overwritten.
@@ -97,6 +102,8 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
     DATA mv_commit TYPE zif_abapgit_git_definitions=>ty_sha1.
     DATA mt_files TYPE ty_files.
     DATA mt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    "! Files with content, as abapGit's pull returns them
+    DATA mt_pulled TYPE zif_abapgit_git_definitions=>ty_files_tt.
     "! Asks for the push advertisement (git-receive-pack), which the Git host
     "! only sends to users who may push.
     METHODS check_push_access
@@ -170,7 +177,7 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD read_branch.
-    CLEAR: mv_branch_ref, mv_commit, mt_files, mt_objects.
+    CLEAR: mv_branch_ref, mv_commit, mt_files, mt_objects, mt_pulled.
     DATA(lv_ref) = c_heads && iv_branch.
     DATA(lt_branches) = zcl_abapgit_git_transport=>branches( mv_url )->get_branches_only( ).
     IF NOT line_exists( lt_branches[ KEY name_key name = lv_ref ] ).
@@ -193,6 +200,18 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     mv_commit = ls_pull-commit.
     mt_files = rs_content-files.
     mt_objects = ls_pull-objects.
+    mt_pulled = ls_pull-files.
+  ENDMETHOD.
+
+  METHOD get_content.
+    " abapGit keeps /folder/ and the file name separately
+    DATA(lv_folder) = |/{ substring_before( val = iv_path sub = '/' occ = -1 ) }/|.
+    DATA(lv_filename) = substring_after( val = iv_path sub = '/' occ = -1 ).
+    READ TABLE mt_pulled INTO DATA(ls_file) WITH KEY file_path COMPONENTS path = lv_folder filename = lv_filename.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( |{ iv_path } is not in the repository| ).
+    ENDIF.
+    rv_data = ls_file-data.
   ENDMETHOD.
 
   METHOD commit.

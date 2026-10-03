@@ -22,12 +22,21 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         changed_at TYPE string,
         changed_by TYPE string,
         size       TYPE i,
-        "! For commit and restore: BPC document and its last change
+        "! For commit and restore: BPC document and its last change, and the
+        "! Git blob at the branch head (initial if not in Git)
         docname     TYPE uj_docname,
+        git_sha1    TYPE string,
         lstmod_date TYPE uj_lstmod_date,
         lstmod_time TYPE uj_lstmod_time,
       END OF ty_workbook,
       ty_workbooks TYPE STANDARD TABLE OF ty_workbook WITH DEFAULT KEY.
+    TYPES:
+      BEGIN OF ty_restore_result,
+        path    TYPE string,
+        ok      TYPE abap_bool,
+        message TYPE string,
+      END OF ty_restore_result,
+      ty_restore_results TYPE STANDARD TABLE OF ty_restore_result WITH DEFAULT KEY.
     TYPES:
       BEGIN OF ty_overview,
         branch_found TYPE abap_bool,
@@ -90,6 +99,26 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
       EXPORTING ev_error TYPE string
                 ev_commit TYPE string
       RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
+    "! Writes the Git version of the given files into BPC (F5): creates or
+    "! overwrites them, or deletes those deleted in Git, and records them as
+    "! synced. Refuses the whole request, with ev_error, if the branch has moved
+    "! past iv_expected_commit or a file's status does not allow a restore.
+    "! Otherwise each file succeeds or fails on its own (et_results), e.g. when
+    "! it is locked in BPC or a logic script does not pass BPC's validation.
+    METHODS restore_files
+      IMPORTING iv_environment TYPE uj_appset_id
+                io_remote TYPE REF TO zcl_bpc_git_remote
+                it_paths TYPE string_table
+                iv_expected_commit TYPE string
+      EXPORTING ev_error TYPE string
+                et_results TYPE ty_restore_results
+      RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
+    "! True for the statuses whose Git version may be restored: new or
+    "! modified in Git, never synced but different, or deleted in Git.
+    "! Conflicts are refused, like in commit.
+    CLASS-METHODS is_restorable
+      IMPORTING iv_status TYPE string
+      RETURNING VALUE(rv_restorable) TYPE abap_bool.
     "! True for the statuses whose BPC version may be committed: new or
     "! modified in BPC, never synced but different, or deleted in BPC.
     "! Conflicts and Git-side changes are refused, so nothing in Git that the
@@ -171,6 +200,28 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS to_path
       IMPORTING iv_environment TYPE uj_appset_id iv_docname TYPE csequence
       RETURNING VALUE(rv_path) TYPE string.
+    "! Writes one file from Git into BPC; returns a message if it was not.
+    METHODS restore_file
+      IMPORTING io_files TYPE REF TO cl_ujf_file_service_mgr
+                io_remote TYPE REF TO zcl_bpc_git_remote
+                iv_environment TYPE uj_appset_id
+                is_file TYPE ty_workbook
+      RETURNING VALUE(rv_message) TYPE string
+      RAISING cx_uj_static_check zcx_abapgit_exception.
+    "! Creates the missing folders of a document name, level by level.
+    METHODS ensure_folder
+      IMPORTING io_files TYPE REF TO cl_ujf_file_service_mgr
+                iv_environment TYPE uj_appset_id
+                iv_docname TYPE uj_docname
+      RAISING cx_uj_static_check.
+    "! Validates a logic script with BPC (as its script editor does); returns
+    "! the first error, or nothing if the script is valid.
+    METHODS validate_script
+      IMPORTING iv_environment TYPE uj_appset_id
+                iv_model TYPE string
+                iv_docname TYPE uj_docname
+                iv_content TYPE xstring
+      RETURNING VALUE(rv_error) TYPE string.
     "! Status of a workbook that is in BPC and in Git (section 6).
     METHODS compare
       IMPORTING io_files TYPE REF TO cl_ujf_file_service_mgr
@@ -276,7 +327,8 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       READ TABLE lt_states INTO ls_state WITH TABLE KEY docname = ls_bpc-docname.
       lv_synced = boolc( sy-subrc = 0 ).
       READ TABLE ls_branch-files INTO DATA(ls_git) WITH TABLE KEY path = ls_bpc-path.
-      IF sy-subrc <> 0.
+      ls_row-git_sha1 = COND #( WHEN sy-subrc = 0 THEN ls_git-sha1 ).
+      IF ls_row-git_sha1 IS INITIAL.
         ls_row-status = COND #( WHEN lv_synced = abap_true THEN c_status-deleted_git
                                 ELSE c_status-new_bpc ).
       ELSE.
@@ -300,6 +352,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         model   = get_model( ls_git-path )
         team    = get_team( ls_git-path )
         docname = lv_docname
+        git_sha1 = ls_git-sha1
         status  = COND #( WHEN line_exists( lt_states[ docname = lv_docname ] )
                           THEN c_status-deleted_bpc ELSE c_status-new_git ) )
         TO rs_overview-workbooks.
@@ -385,6 +438,189 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       DELETE FROM zbpc_git_state WHERE appset = @iv_environment AND docname = @lv_docname.
     ENDLOOP.
     COMMIT WORK.
+  ENDMETHOD.
+
+  METHOD restore_files.
+    CLEAR: ev_error, et_results.
+    IF it_paths IS INITIAL.
+      ev_error = 'Select at least one file'.
+      RETURN.
+    ENDIF.
+
+    " Statuses as of now, from the head whose content is restored
+    DATA(ls_config) = get_config( iv_environment ).
+    DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote ).
+    IF ls_overview-branch_found = abap_false.
+      ev_error = |Branch { ls_config-branch } does not exist in the repository.|.
+      RETURN.
+    ENDIF.
+    IF ls_overview-commit <> to_lower( iv_expected_commit ).
+      ev_error = |Branch { ls_config-branch } has new commits since you loaded the list. | &&
+                 |Reload it and check the changes before restoring.|.
+      RETURN.
+    ENDIF.
+
+    DATA lt_files TYPE ty_workbooks.
+    LOOP AT it_paths INTO DATA(lv_path).
+      READ TABLE ls_overview-workbooks INTO DATA(ls_file) WITH KEY path = lv_path.
+      IF sy-subrc <> 0.
+        ev_error = |{ lv_path } is no longer in BPC or Git. Reload the list.|.
+        RETURN.
+      ENDIF.
+      IF is_restorable( ls_file-status ) = abap_false.
+        ev_error = |{ lv_path } cannot be restored in its current status ({ ls_file-status }). Reload the list.|.
+        RETURN.
+      ENDIF.
+      APPEND ls_file TO lt_files.
+    ENDLOOP.
+
+    " Saving logic scripts needs the same task as BPC's script editor
+    IF line_exists( lt_files[ kind = c_kind-script ] ).
+      cl_uj_context=>get_cur_context( )->check_task_access( i_task_name = uje0_cs_task_id-p0008 ).
+    ENDIF.
+
+    DATA(lo_files) = get_file_service( iv_environment ).
+    LOOP AT lt_files INTO ls_file.
+      DATA(lv_message) = restore_file( io_files = lo_files io_remote = io_remote
+                                       iv_environment = iv_environment is_file = ls_file ).
+      APPEND VALUE #( path = ls_file-path ok = xsdbool( lv_message IS INITIAL ) message = lv_message )
+        TO et_results.
+      IF lv_message IS NOT INITIAL.
+        CONTINUE.
+      ENDIF.
+
+      " Restored: BPC now holds the Git version
+      IF ls_file-status = c_status-deleted_git.
+        DELETE FROM zbpc_git_state WHERE appset = @iv_environment AND docname = @ls_file-docname.
+      ELSE.
+        DATA ls_attributes TYPE ujf_doc.
+        CLEAR ls_attributes.
+        lo_files->get_document_attributes( EXPORTING i_docname = ls_file-docname
+                                           IMPORTING es_document_attributes = ls_attributes ).
+        DATA ls_state TYPE zbpc_git_state.
+        ls_state = VALUE #( appset      = iv_environment
+                            docname     = ls_file-docname
+                            blob_sha1   = ls_file-git_sha1
+                            commit_sha1 = ls_overview-commit
+                            lstmod_date = ls_attributes-lstmod_date
+                            lstmod_time = ls_attributes-lstmod_time
+                            synced_by   = sy-uname ).
+        GET TIME STAMP FIELD ls_state-synced_at.
+        MODIFY zbpc_git_state FROM ls_state.
+      ENDIF.
+    ENDLOOP.
+    COMMIT WORK.
+  ENDMETHOD.
+
+  METHOD restore_file.
+    DATA lv_locked TYPE uj_flg.
+    DATA lv_content TYPE xstring.
+
+    TRY.
+        " Never overwrite a document someone has open for editing
+        IF is_file-in_bpc = abap_true.
+          lv_locked = io_files->check_document_lock( is_file-docname ).
+          IF lv_locked = abap_true.
+            rv_message = 'Locked in BPC, e.g. open for editing. Try again later.'.
+            RETURN.
+          ENDIF.
+        ENDIF.
+
+        IF is_file-status = c_status-deleted_git.
+          io_files->delete_document( is_file-docname ).
+          RETURN.
+        ENDIF.
+
+        lv_content = io_remote->get_content( is_file-path ).
+        IF is_file-kind = c_kind-script.
+          " BPC reads scripts as lines split at CRLF; files edited elsewhere may use LF
+          DATA(lv_text) = cl_abap_codepage=>convert_from( lv_content ).
+          REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>cr_lf IN lv_text
+            WITH cl_abap_char_utilities=>newline.
+          REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>newline IN lv_text
+            WITH cl_abap_char_utilities=>cr_lf.
+          lv_content = cl_abap_codepage=>convert_to( lv_text ).
+          rv_message = validate_script( iv_environment = iv_environment iv_model = is_file-model
+                                        iv_docname = is_file-docname iv_content = lv_content ).
+          IF rv_message IS NOT INITIAL.
+            rv_message = |Not valid in BPC: { rv_message }|.
+            RETURN.
+          ENDIF.
+        ENDIF.
+
+        IF is_file-in_bpc = abap_false.
+          ensure_folder( io_files = io_files iv_environment = iv_environment iv_docname = is_file-docname ).
+        ELSE.
+          io_files->lock_document( is_file-docname ).
+        ENDIF.
+        TRY.
+            io_files->put_document( i_docname = is_file-docname i_doc_content = lv_content
+                                    i_compression = abap_false i_splice_zip = abap_false ).
+          CLEANUP.
+            IF is_file-in_bpc = abap_true.
+              TRY.
+                  io_files->unlock_document( is_file-docname ).
+                CATCH cx_ujf_file_service_error ##NO_HANDLER.
+              ENDTRY.
+            ENDIF.
+        ENDTRY.
+        IF is_file-in_bpc = abap_true.
+          io_files->unlock_document( is_file-docname ).
+        ENDIF.
+      CATCH cx_ujf_file_service_error INTO DATA(lx_file).
+        rv_message = lx_file->get_text( ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD ensure_folder.
+    DATA lv_exists TYPE uj_flg.
+    DATA lv_folder TYPE ujf_doctree-docname.
+    DATA lt_parts TYPE string_table.
+    " \ROOT\WEBFOLDERS\<env>\ exists; create each level below it that is missing
+    DATA(lv_root) = |\\ROOT\\WEBFOLDERS\\{ iv_environment }\\|.
+    DATA(lv_relative) = substring( val = iv_docname off = strlen( lv_root ) ).
+    SPLIT lv_relative AT '\' INTO TABLE lt_parts.
+    DELETE lt_parts INDEX lines( lt_parts ).  " the file name
+    DATA(lv_path) = lv_root.
+    LOOP AT lt_parts INTO DATA(lv_part).
+      lv_path = |{ lv_path }{ lv_part }\\|.
+      lv_folder = lv_path.
+      io_files->check_directory_exist( EXPORTING i_dirname = lv_folder i_appset_id = iv_environment
+                                       IMPORTING e_result = lv_exists ).
+      IF lv_exists = abap_false.
+        io_files->create_directory( lv_folder ).
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD validate_script.
+    DATA lt_logic TYPE ujk_t_script_logic_scripttable.
+    DATA lt_lines TYPE string_table.
+    DATA lt_messages TYPE uj0_t_message.
+    DATA lv_fm_error TYPE string.
+    SPLIT cl_abap_codepage=>convert_from( iv_content ) AT cl_abap_char_utilities=>cr_lf INTO TABLE lt_lines.
+    LOOP AT lt_lines INTO DATA(lv_line).
+      APPEND VALUE #( original_line = sy-tabix original_file = iv_docname content = lv_line ) TO lt_logic.
+    ENDLOOP.
+    cl_ujk_script_logic=>validate( EXPORTING i_appset = iv_environment
+                                             i_application = CONV uj_appl_id( iv_model )
+                                             i_user = CONV uj_user_id( sy-uname )
+                                             i_logic = lt_logic
+                                             i_lgf = iv_docname
+                                   IMPORTING e_fm_error_message = lv_fm_error
+                                             et_message = lt_messages ).
+    LOOP AT lt_messages INTO DATA(ls_message) WHERE msgty CA 'EAX'.
+      rv_error = ls_message-message.
+      RETURN.
+    ENDLOOP.
+    rv_error = lv_fm_error.
+  ENDMETHOD.
+
+  METHOD is_restorable.
+    rv_restorable = xsdbool( iv_status = c_status-modified_git
+                          OR iv_status = c_status-new_git
+                          OR iv_status = c_status-differs
+                          OR iv_status = c_status-deleted_git ).
   ENDMETHOD.
 
   METHOD is_committable.

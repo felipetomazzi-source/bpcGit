@@ -156,11 +156,38 @@ The screen has filters by status and model, plus a search box.
 
 ### F5. Restore from Git
 
-1. The user selects workbooks (usually "Modified in Git" or "New in Git").
-   Optionally, they pick a commit; the default is the branch head.
-2. The app asks for confirmation, because restoring overwrites the content in BPC.
-3. For each file, the app locks the BPC document, writes the content, and unlocks it.
-4. The app refuses to overwrite a document that someone else has locked in BPC.
+1. The user ticks files, one by one or with **Select Git changes**. These
+   statuses can be restored:
+
+   | Status | Restore does |
+   |---|---|
+   | Modified in Git | writes the Git version into BPC |
+   | New in Git | creates the file in BPC (missing folders are created) |
+   | Differs, never synced | replaces the BPC version with the Git version |
+   | Deleted in Git | deletes the file from BPC |
+
+   Conflicts are refused, as in F4. "Differs" can be committed or restored:
+   commit makes BPC win, restore makes Git win.
+2. **Restore (n)** shows what will be overwritten or deleted and warns that
+   bpcGit keeps no copy of a BPC version that was never committed.
+3. The backend recomputes the statuses from the branch head and refuses if
+   the head is not the one the user saw or a file is no longer restorable.
+   The content comes from the same abapGit pull.
+4. Each file then succeeds or fails on its own:
+   - A file locked in BPC (`CHECK_DOCUMENT_LOCK`, e.g. open for editing) is
+     skipped. Others are locked, written with `PUT_DOCUMENT` (no compression,
+     no zip splicing, as in bpcIO) and unlocked.
+   - Logic scripts: line endings are normalized to CRLF (BPC splits scripts
+     at CRLF; files edited elsewhere may use LF), then the script is validated
+     with `CL_UJK_SCRIPT_LOGIC=>VALIDATE`, as BPC's script editor does. An
+     invalid script is not written; the result carries BPC's message.
+     Restoring scripts needs task P0008, like bpcIO's script import.
+     No `.LGX` needs to be written: BPC compiles scripts when they run
+     (checked on dev 2026-10-03: models have no `<NAME>.LGX`, only temporary
+     ones with generated names).
+5. `ZBPC_GIT_STATE` records the Git blob, the commit and the new BPC
+   timestamp for restored files (rows of deleted files are removed), so they
+   show as Unchanged. The overview reloads and failures are listed.
 
 ### F6. History
 

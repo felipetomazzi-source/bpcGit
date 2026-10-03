@@ -15,6 +15,7 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
         connection   TYPE string VALUE '/connection',
         workbooks    TYPE string VALUE '/workbooks',
         commit       TYPE string VALUE '/commit',
+        restore      TYPE string VALUE '/restore',
       END OF c_resource.
     "! Longest Git user name and access token accepted.
     CONSTANTS c_max_user TYPE i VALUE 255 ##NO_TEXT.
@@ -66,6 +67,16 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS handle_commit
       IMPORTING io_service TYPE REF TO zcl_bpc_git_service
       RAISING cx_uj_static_check.
+    "! Writes the Git version of the selected files into BPC. Fields:
+    "! environment, commit (head the user saw), paths (one per line), and the
+    "! optional user and token. Answers the result of each file.
+    METHODS handle_restore
+      IMPORTING io_service TYPE REF TO zcl_bpc_git_service
+      RAISING cx_uj_static_check.
+    "! Reads the paths field: one repository path per line. Answers 400 and
+    "! returns nothing if there are none or too many.
+    METHODS read_paths
+      RETURNING VALUE(rt_paths) TYPE string_table.
     "! Reads environment, user and token of a request that talks to the Git
     "! host and creates the Git client for the environment's repository.
     "! Answers the request and returns nothing if the input is invalid.
@@ -135,6 +146,10 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
           WHEN c_resource-commit.
             IF require_method( c_method-post ).
               handle_commit( lo_service ).
+            ENDIF.
+          WHEN c_resource-restore.
+            IF require_method( c_method-post ).
+              handle_restore( lo_service ).
             ENDIF.
           WHEN OTHERS.
             respond_error( iv_code = 404 iv_reason = 'Not Found'
@@ -302,15 +317,11 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
                                    iv_max_length = c_max_message ).
     DATA(lv_expected) = read_field( iv_name = 'commit' iv_label = 'current commit'
                                     iv_max_length = 40 iv_required = abap_false ).
-    DATA(lv_paths) = mo_server->request->get_form_field( 'paths' ).
-    SPLIT lv_paths AT cl_abap_char_utilities=>newline INTO TABLE lt_paths.
-    DELETE lt_paths WHERE table_line IS INITIAL.
     IF mv_invalid = abap_true.
       RETURN.
     ENDIF.
-    IF lt_paths IS INITIAL OR lines( lt_paths ) > c_max_paths.
-      respond_error( iv_code = 400 iv_reason = 'Bad Request'
-                     iv_message = |Select between 1 and { c_max_paths } workbooks| ).
+    lt_paths = read_paths( ).
+    IF lt_paths IS INITIAL.
       RETURN.
     ENDIF.
 
@@ -342,6 +353,70 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     respond( iv_code = 200 iv_reason = 'OK' iv_json =
       `{"commit":` && quote( lv_commit ) &&
       `,"count":` && |{ lines( lt_paths ) }| && `}` ).
+  ENDMETHOD.
+
+  METHOD handle_restore.
+    DATA lv_environment TYPE uj_appset_id.
+    DATA ls_config TYPE zbpc_git_repo.
+    DATA lo_remote TYPE REF TO zcl_bpc_git_remote.
+    DATA lv_with_login TYPE abap_bool.
+    DATA lv_error TYPE string.
+    DATA lt_results TYPE zcl_bpc_git_service=>ty_restore_results.
+
+    DATA(lv_expected) = read_field( iv_name = 'commit' iv_label = 'current commit'
+                                    iv_max_length = 40 iv_required = abap_false ).
+    IF mv_invalid = abap_true.
+      RETURN.
+    ENDIF.
+    DATA(lt_paths) = read_paths( ).
+    IF lt_paths IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    TRY.
+        create_remote( EXPORTING io_service = io_service
+                       IMPORTING ev_environment = lv_environment es_config = ls_config
+                                 eo_remote = lo_remote ev_with_login = lv_with_login ).
+        IF lo_remote IS NOT BOUND.
+          RETURN.
+        ENDIF.
+        io_service->restore_files( EXPORTING iv_environment = lv_environment
+                                             io_remote = lo_remote
+                                             it_paths = lt_paths
+                                             iv_expected_commit = lv_expected
+                                   IMPORTING ev_error = lv_error
+                                             et_results = lt_results ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_git).
+        respond_git_error( ix_error = lx_git iv_with_login = lv_with_login ).
+        RETURN.
+    ENDTRY.
+
+    IF lv_error IS NOT INITIAL.
+      respond_error( iv_code = 409 iv_reason = 'Conflict' iv_message = lv_error ).
+      RETURN.
+    ENDIF.
+    DATA lv_json TYPE string.
+    DATA lv_separator TYPE string.
+    LOOP AT lt_results INTO DATA(ls_result).
+      lv_json = lv_json && lv_separator &&
+        `{"path":` && quote( ls_result-path ) &&
+        `,"ok":` && COND string( WHEN ls_result-ok = abap_true THEN `true` ELSE `false` ) &&
+        `,"message":` && quote( ls_result-message ) && `}`.
+      lv_separator = ','.
+    ENDLOOP.
+    respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"results":[` && lv_json && `]}` ).
+  ENDMETHOD.
+
+  METHOD read_paths.
+    DATA(lv_paths) = mo_server->request->get_form_field( 'paths' ).
+    REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>cr_lf IN lv_paths WITH cl_abap_char_utilities=>newline.
+    SPLIT lv_paths AT cl_abap_char_utilities=>newline INTO TABLE rt_paths.
+    DELETE rt_paths WHERE table_line IS INITIAL.
+    IF rt_paths IS INITIAL OR lines( rt_paths ) > c_max_paths.
+      CLEAR rt_paths.
+      respond_error( iv_code = 400 iv_reason = 'Bad Request'
+                     iv_message = |Select between 1 and { c_max_paths } files| ).
+    ENDIF.
   ENDMETHOD.
 
   METHOD create_remote.
