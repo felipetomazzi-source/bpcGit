@@ -26,6 +26,7 @@ Base path: `/sap/bc/zbpc_git` (handler `ZCL_BPC_GIT_HTTP`)
 | POST | `/config` | Save it (`environment`, `url`, `branch`) |
 | POST | `/connection` | Test the connection (`environment`; optional `user`, `token`) |
 | POST | `/workbooks` | Workbooks in BPC and Git with their status (`environment`; optional `user`, `token`) |
+| POST | `/commit` | Commit workbooks (`environment`, `message`, `commit` = head seen, `paths` one per line; `user`, `token`) |
 
 Git login works as in abapGit: requests go without credentials first. When the
 Git host wants a login, the API answers 403 with `"authRequired": true` and the
@@ -41,5 +42,5 @@ a form on another website cannot change data with the user's session.
 2. REST handler with `/ping`, shown on the start page (done)
 3. Config table `ZBPC_GIT_REPO` and setup screen (done)
 4. abapGit wrapper, Git login as in abapGit, "Test connection" (done)
-5. Workbook list with Git status; sync table `ZBPC_GIT_STATE`
-6. Commit, 7. Restore, 8. History
+5. Workbook list with Git status; sync table `ZBPC_GIT_STATE` (done)
+6. Commit selected workbooks (staging), 7. Restore, 8. History

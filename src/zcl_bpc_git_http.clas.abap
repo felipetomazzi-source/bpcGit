@@ -14,10 +14,14 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
         config       TYPE string VALUE '/config',
         connection   TYPE string VALUE '/connection',
         workbooks    TYPE string VALUE '/workbooks',
+        commit       TYPE string VALUE '/commit',
       END OF c_resource.
     "! Longest Git user name and access token accepted.
     CONSTANTS c_max_user TYPE i VALUE 255 ##NO_TEXT.
     CONSTANTS c_max_token TYPE i VALUE 1024 ##NO_TEXT.
+    "! Longest commit message, and most workbooks in one commit.
+    CONSTANTS c_max_message TYPE i VALUE 4000 ##NO_TEXT.
+    CONSTANTS c_max_paths TYPE i VALUE 1000 ##NO_TEXT.
     CONSTANTS:
       BEGIN OF c_method,
         get  TYPE string VALUE 'GET',
@@ -54,6 +58,12 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RAISING cx_uj_static_check.
     "! Workbooks of the environment in BPC and Git, with their status.
     METHODS handle_workbooks
+      IMPORTING io_service TYPE REF TO zcl_bpc_git_service
+      RAISING cx_uj_static_check.
+    "! Commits the BPC version of the selected workbooks in one commit.
+    "! Fields: environment, message, commit (head the user saw), paths (one
+    "! repository path per line), and the optional user and token.
+    METHODS handle_commit
       IMPORTING io_service TYPE REF TO zcl_bpc_git_service
       RAISING cx_uj_static_check.
     "! Reads environment, user and token of a request that talks to the Git
@@ -121,6 +131,10 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
           WHEN c_resource-workbooks.
             IF require_method( c_method-post ).
               handle_workbooks( lo_service ).
+            ENDIF.
+          WHEN c_resource-commit.
+            IF require_method( c_method-post ).
+              handle_commit( lo_service ).
             ENDIF.
           WHEN OTHERS.
             respond_error( iv_code = 404 iv_reason = 'Not Found'
@@ -271,6 +285,61 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       `,"branchFound":` && COND string( WHEN ls_overview-branch_found = abap_true THEN `true` ELSE `false` ) &&
       `,"commit":` && quote( ls_overview-commit ) &&
       `,"workbooks":[` && lv_json && `]}` ).
+  ENDMETHOD.
+
+  METHOD handle_commit.
+    DATA lv_environment TYPE uj_appset_id.
+    DATA ls_config TYPE zbpc_git_repo.
+    DATA lo_remote TYPE REF TO zcl_bpc_git_remote.
+    DATA lv_with_login TYPE abap_bool.
+    DATA lt_paths TYPE string_table.
+    DATA lv_error TYPE string.
+    DATA lv_commit TYPE string.
+
+    DATA(lv_message) = read_field( iv_name = 'message' iv_label = 'commit message'
+                                   iv_max_length = c_max_message ).
+    DATA(lv_expected) = read_field( iv_name = 'commit' iv_label = 'current commit'
+                                    iv_max_length = 40 iv_required = abap_false ).
+    DATA(lv_paths) = mo_server->request->get_form_field( 'paths' ).
+    SPLIT lv_paths AT cl_abap_char_utilities=>newline INTO TABLE lt_paths.
+    DELETE lt_paths WHERE table_line IS INITIAL.
+    IF mv_invalid = abap_true.
+      RETURN.
+    ENDIF.
+    IF lt_paths IS INITIAL OR lines( lt_paths ) > c_max_paths.
+      respond_error( iv_code = 400 iv_reason = 'Bad Request'
+                     iv_message = |Select between 1 and { c_max_paths } workbooks| ).
+      RETURN.
+    ENDIF.
+
+    TRY.
+        create_remote( EXPORTING io_service = io_service
+                       IMPORTING ev_environment = lv_environment es_config = ls_config
+                                 eo_remote = lo_remote ev_with_login = lv_with_login ).
+        IF lo_remote IS NOT BOUND.
+          RETURN.
+        ENDIF.
+        io_service->commit_workbooks(
+          EXPORTING iv_environment = lv_environment
+                    io_remote = lo_remote
+                    it_paths = lt_paths
+                    iv_message = lv_message
+                    iv_expected_commit = lv_expected
+                    iv_git_user = mo_server->request->get_form_field( 'user' )
+          IMPORTING ev_error = lv_error
+                    ev_commit = lv_commit ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_git).
+        respond_git_error( ix_error = lx_git iv_with_login = lv_with_login ).
+        RETURN.
+    ENDTRY.
+
+    IF lv_error IS NOT INITIAL.
+      respond_error( iv_code = 409 iv_reason = 'Conflict' iv_message = lv_error ).
+      RETURN.
+    ENDIF.
+    respond( iv_code = 200 iv_reason = 'OK' iv_json =
+      `{"commit":` && quote( lv_commit ) &&
+      `,"count":` && |{ lines( lt_paths ) }| && `}` ).
   ENDMETHOD.
 
   METHOD create_remote.

@@ -99,15 +99,34 @@ The screen has filters by status and model, plus a search box.
 
 ### F4. Commit to Git
 
-1. The user selects workbooks (usually "Modified in BPC" or "New in BPC") and
-   enters a commit message.
-2. The app reads each file's content from BPC and creates **one commit** on the
-   configured branch containing all of the files.
-3. The commit author is the BPC user, using a name and email kept in the
-   configuration (see Q5).
-4. The app updates the stored sync state and refreshes the overview.
-5. The app refuses the commit if the branch has moved on since the overview
-   loaded and any selected file is "Modified in Git" or "Conflict".
+1. The user ticks workbooks in the overview, one by one or with **Select all
+   changes** (every committable workbook in the current filter). Only these
+   statuses can be ticked; other rows are unticked again with a message:
+
+   | Status | Commit does |
+   |---|---|
+   | New in BPC | adds the file to Git |
+   | Modified in BPC | updates it in Git |
+   | Differs, never synced | replaces the Git version with the BPC version |
+   | Deleted in BPC | deletes it from Git |
+
+   Unchanged has nothing to commit; Modified in Git and New in Git are for
+   restore (F5); Conflict and Deleted in Git are refused so that a change in
+   Git the user has not seen is never overwritten.
+2. **Commit (n)** opens a dialog listing what happens to each workbook, and
+   asks for a commit message.
+3. The backend recomputes the statuses from the current branch head and
+   refuses if the head is not the one the user saw ("reload the list") or a
+   workbook is no longer committable. It then reads the BPC content and makes
+   **one commit** with all files through abapGit's porcelain push, which also
+   fails if the branch moves in between.
+4. Author and committer: the SAP user's name and e-mail from the user master
+   (as abapGit reads them); without an e-mail, the GitHub no-reply address of
+   the Git user.
+5. After the push the app writes `ZBPC_GIT_STATE` (blob, commit, BPC
+   timestamp) for added and updated workbooks, deletes the rows of deleted
+   ones, and reloads the overview.
+6. Pushing needs a Git login; the app asks for it as in section 7.2.
 
 ### F5. Restore from Git
 

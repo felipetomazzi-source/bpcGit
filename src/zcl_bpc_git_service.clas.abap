@@ -16,6 +16,10 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         changed_at TYPE string,
         changed_by TYPE string,
         size       TYPE i,
+        "! For commit and restore: BPC document and its last change
+        docname     TYPE uj_docname,
+        lstmod_date TYPE uj_lstmod_date,
+        lstmod_time TYPE uj_lstmod_time,
       END OF ty_workbook,
       ty_workbooks TYPE STANDARD TABLE OF ty_workbook WITH DEFAULT KEY.
     TYPES:
@@ -60,6 +64,27 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 io_remote TYPE REF TO zcl_bpc_git_remote
       RETURNING VALUE(rs_overview) TYPE ty_overview
       RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
+    "! Commits the BPC version of the given workbooks in one commit (F4) and
+    "! records them as synced. Refuses, with ev_error for the user, if the
+    "! branch has moved past iv_expected_commit (the head the user saw) or a
+    "! workbook's status does not allow a commit (see is_committable).
+    METHODS commit_workbooks
+      IMPORTING iv_environment TYPE uj_appset_id
+                io_remote TYPE REF TO zcl_bpc_git_remote
+                it_paths TYPE string_table
+                iv_message TYPE string
+                iv_expected_commit TYPE string
+                iv_git_user TYPE string OPTIONAL
+      EXPORTING ev_error TYPE string
+                ev_commit TYPE string
+      RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
+    "! True for the statuses whose BPC version may be committed: new or
+    "! modified in BPC, never synced but different, or deleted in BPC.
+    "! Conflicts and Git-side changes are refused, so nothing in Git that the
+    "! user has not seen is overwritten.
+    CLASS-METHODS is_committable
+      IMPORTING iv_status TYPE string
+      RETURNING VALUE(rv_committable) TYPE abap_bool.
   PRIVATE SECTION.
     TYPES:
       BEGIN OF ty_bpc_workbook,
@@ -207,7 +232,10 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         in_bpc     = abap_true
         changed_at = |{ ls_bpc-lstmod_date DATE = ISO } { ls_bpc-lstmod_time TIME = ISO }|
         changed_by = ls_bpc-lstmod_user
-        size       = ls_bpc-size ).
+        size       = ls_bpc-size
+        docname     = ls_bpc-docname
+        lstmod_date = ls_bpc-lstmod_date
+        lstmod_time = ls_bpc-lstmod_time ).
       CLEAR ls_state.
       READ TABLE lt_states INTO ls_state WITH TABLE KEY docname = ls_bpc-docname.
       lv_synced = boolc( sy-subrc = 0 ).
@@ -229,13 +257,101 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       ENDIF.
       DATA(lv_docname) = to_docname( iv_environment = iv_environment iv_path = ls_git-path ).
       APPEND VALUE #(
-        path   = ls_git-path
-        model  = substring_before( val = ls_git-path sub = '/' )
-        status = COND #( WHEN line_exists( lt_states[ docname = lv_docname ] )
-                         THEN c_status-deleted_bpc ELSE c_status-new_git ) )
+        path    = ls_git-path
+        model   = substring_before( val = ls_git-path sub = '/' )
+        docname = lv_docname
+        status  = COND #( WHEN line_exists( lt_states[ docname = lv_docname ] )
+                          THEN c_status-deleted_bpc ELSE c_status-new_git ) )
         TO rs_overview-workbooks.
     ENDLOOP.
     SORT rs_overview-workbooks BY path.
+  ENDMETHOD.
+
+  METHOD commit_workbooks.
+    DATA lt_changes TYPE zcl_bpc_git_remote=>ty_changes.
+    DATA lt_synced TYPE STANDARD TABLE OF zbpc_git_state WITH DEFAULT KEY.
+    DATA lt_unsynced TYPE STANDARD TABLE OF uj_docname WITH DEFAULT KEY.
+    DATA lv_document TYPE xstring.
+    CLEAR: ev_error, ev_commit.
+
+    IF condense( iv_message ) = ``.
+      ev_error = 'Enter a commit message'.
+      RETURN.
+    ENDIF.
+    IF it_paths IS INITIAL.
+      ev_error = 'Select at least one workbook'.
+      RETURN.
+    ENDIF.
+
+    " Statuses as of now, from the same head the commit builds on
+    DATA(ls_config) = get_config( iv_environment ).
+    DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote ).
+    IF ls_overview-branch_found = abap_false.
+      ev_error = |Branch { ls_config-branch } does not exist in the repository yet. | &&
+                 |Create it on the Git host first, for example by adding a README file.|.
+      RETURN.
+    ENDIF.
+    IF ls_overview-commit <> to_lower( iv_expected_commit ).
+      ev_error = |Branch { ls_config-branch } has new commits since you loaded the list. | &&
+                 |Reload it and check the changes before committing.|.
+      RETURN.
+    ENDIF.
+
+    DATA(lo_files) = get_file_service( iv_environment ).
+    LOOP AT it_paths INTO DATA(lv_path).
+      READ TABLE ls_overview-workbooks INTO DATA(ls_workbook) WITH KEY path = lv_path.
+      IF sy-subrc <> 0.
+        ev_error = |{ lv_path } is no longer in BPC or Git. Reload the list.|.
+        RETURN.
+      ENDIF.
+      IF is_committable( ls_workbook-status ) = abap_false.
+        ev_error = |{ lv_path } cannot be committed in its current status ({ ls_workbook-status }). Reload the list.|.
+        RETURN.
+      ENDIF.
+
+      IF ls_workbook-status = c_status-deleted_bpc.
+        APPEND VALUE #( path = lv_path delete = abap_true ) TO lt_changes.
+        APPEND ls_workbook-docname TO lt_unsynced.
+      ELSE.
+        CLEAR lv_document.
+        lo_files->get_document( EXPORTING i_docname = ls_workbook-docname i_retzip = abap_false
+                                IMPORTING e_document_content = lv_document ).
+        APPEND VALUE #( path = lv_path data = lv_document ) TO lt_changes.
+        APPEND VALUE #( appset      = iv_environment
+                        docname     = ls_workbook-docname
+                        blob_sha1   = zcl_bpc_git_remote=>blob_sha1( lv_document )
+                        lstmod_date = ls_workbook-lstmod_date
+                        lstmod_time = ls_workbook-lstmod_time
+                        synced_by   = sy-uname ) TO lt_synced.
+      ENDIF.
+    ENDLOOP.
+
+    zcl_bpc_git_remote=>get_author( EXPORTING iv_user = sy-uname iv_git_user = iv_git_user
+                                    IMPORTING ev_name = DATA(lv_author) ev_email = DATA(lv_email) ).
+    ev_commit = io_remote->commit( it_changes = lt_changes
+                                   iv_message = iv_message
+                                   iv_author_name = lv_author
+                                   iv_author_email = lv_email ).
+
+    " Pushed: record what Git now holds for these documents
+    DATA lv_now TYPE timestampl.
+    GET TIME STAMP FIELD lv_now.
+    LOOP AT lt_synced ASSIGNING FIELD-SYMBOL(<ls_synced>).
+      <ls_synced>-commit_sha1 = ev_commit.
+      <ls_synced>-synced_at = lv_now.
+    ENDLOOP.
+    MODIFY zbpc_git_state FROM TABLE lt_synced.
+    LOOP AT lt_unsynced INTO DATA(lv_docname).
+      DELETE FROM zbpc_git_state WHERE appset = @iv_environment AND docname = @lv_docname.
+    ENDLOOP.
+    COMMIT WORK.
+  ENDMETHOD.
+
+  METHOD is_committable.
+    rv_committable = xsdbool( iv_status = c_status-new_bpc
+                           OR iv_status = c_status-modified_bpc
+                           OR iv_status = c_status-differs
+                           OR iv_status = c_status-deleted_bpc ).
   ENDMETHOD.
 
   METHOD compare.

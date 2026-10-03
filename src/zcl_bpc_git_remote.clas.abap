@@ -32,6 +32,15 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
         commit       TYPE string,
         files        TYPE ty_files,
       END OF ty_branch_content.
+    TYPES:
+      BEGIN OF ty_change,
+        "! Repository path, as in ty_file
+        path   TYPE string,
+        "! New content; ignored when deleting
+        data   TYPE xstring,
+        delete TYPE abap_bool,
+      END OF ty_change,
+      ty_changes TYPE STANDARD TABLE OF ty_change WITH DEFAULT KEY.
 
     "! Version of the installed abapGit developer version, initial if it is
     "! missing. Read dynamically so the caller can report a missing abapGit.
@@ -46,6 +55,12 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_data TYPE xstring
       RETURNING VALUE(rv_sha1) TYPE string
       RAISING zcx_abapgit_exception.
+    "! Name and e-mail of an SAP user for commits, from the user master as
+    "! abapGit reads them. Without an e-mail, the GitHub no-reply address of
+    "! the Git user is used, or failing that one made from the SAP user.
+    CLASS-METHODS get_author
+      IMPORTING iv_user TYPE syuname iv_git_user TYPE string OPTIONAL
+      EXPORTING ev_name TYPE string ev_email TYPE string.
     METHODS constructor
       IMPORTING iv_url TYPE csequence
                 iv_user TYPE string OPTIONAL
@@ -57,15 +72,31 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_branch TYPE csequence
       RETURNING VALUE(rs_result) TYPE ty_connection
       RAISING zcx_abapgit_exception.
-    "! Paths and blob hashes of all files at the head of a branch.
+    "! Paths and blob hashes of all files at the head of a branch. Keeps the
+    "! Git objects, so that commit can build on this head.
     METHODS read_branch
       IMPORTING iv_branch TYPE csequence
       RETURNING VALUE(rs_content) TYPE ty_branch_content
+      RAISING zcx_abapgit_exception.
+    "! Adds, updates and deletes files in one commit on top of the head that
+    "! read_branch returned, and pushes it. Returns the new commit. The push
+    "! fails if the branch has moved since, so nothing is overwritten.
+    METHODS commit
+      IMPORTING it_changes TYPE ty_changes
+                iv_message TYPE string
+                iv_author_name TYPE string
+                iv_author_email TYPE string
+      RETURNING VALUE(rv_commit) TYPE string
       RAISING zcx_abapgit_exception.
   PRIVATE SECTION.
     CONSTANTS c_heads TYPE string VALUE 'refs/heads/' ##NO_TEXT.
     DATA mv_url TYPE string.
     DATA mv_has_credentials TYPE abap_bool.
+    "! Head read by read_branch: branch ref, commit, files and Git objects
+    DATA mv_branch_ref TYPE string.
+    DATA mv_commit TYPE zif_abapgit_git_definitions=>ty_sha1.
+    DATA mt_files TYPE ty_files.
+    DATA mt_objects TYPE zif_abapgit_definitions=>ty_objects_tt.
     "! Asks for the push advertisement (git-receive-pack), which the Git host
     "! only sends to users who may push.
     METHODS check_push_access
@@ -89,6 +120,20 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
 
   METHOD blob_sha1.
     rv_sha1 = to_lower( zcl_abapgit_hash=>sha1_blob( iv_data ) ).
+  ENDMETHOD.
+
+  METHOD get_author.
+    DATA(li_user) = zcl_abapgit_env_factory=>get_user_record( ).
+    ev_name = li_user->get_name( iv_user ).
+    ev_email = li_user->get_email( iv_user ).
+    IF ev_name IS INITIAL.
+      ev_name = iv_user.
+    ENDIF.
+    IF ev_email IS INITIAL.
+      ev_email = COND #( WHEN iv_git_user IS NOT INITIAL
+                         THEN |{ iv_git_user }@users.noreply.github.com|
+                         ELSE |{ to_lower( iv_user ) }@{ to_lower( sy-sysid ) }.sap| ).
+    ENDIF.
   ENDMETHOD.
 
   METHOD constructor.
@@ -125,6 +170,7 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD read_branch.
+    CLEAR: mv_branch_ref, mv_commit, mt_files, mt_objects.
     DATA(lv_ref) = c_heads && iv_branch.
     DATA(lt_branches) = zcl_abapgit_git_transport=>branches( mv_url )->get_branches_only( ).
     IF NOT line_exists( lt_branches[ KEY name_key name = lv_ref ] ).
@@ -142,6 +188,45 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       ENDIF.
       INSERT VALUE #( path = lv_path sha1 = to_lower( ls_file-sha1 ) ) INTO TABLE rs_content-files.
     ENDLOOP.
+
+    mv_branch_ref = lv_ref.
+    mv_commit = ls_pull-commit.
+    mt_files = rs_content-files.
+    mt_objects = ls_pull-objects.
+  ENDMETHOD.
+
+  METHOD commit.
+    IF mv_commit IS INITIAL.
+      zcx_abapgit_exception=>raise( 'The branch must exist and be read before committing' ).
+    ENDIF.
+
+    DATA(lo_stage) = NEW zcl_abapgit_stage( ).
+    LOOP AT it_changes INTO DATA(ls_change).
+      " abapGit wants /folder/ and the file name separately
+      DATA(lv_folder) = |/{ substring_before( val = ls_change-path sub = '/' occ = -1 ) }/|.
+      DATA(lv_filename) = substring_after( val = ls_change-path sub = '/' occ = -1 ).
+      IF ls_change-delete = abap_true.
+        " abapGit's push stops with an ASSERT for a file that is not in Git
+        IF NOT line_exists( mt_files[ path = ls_change-path ] ).
+          zcx_abapgit_exception=>raise( |{ ls_change-path } is not in the repository| ).
+        ENDIF.
+        lo_stage->rm( iv_path = lv_folder iv_filename = lv_filename ).
+      ELSE.
+        lo_stage->add( iv_path = lv_folder iv_filename = lv_filename iv_data = ls_change-data ).
+      ENDIF.
+    ENDLOOP.
+
+    DATA ls_comment TYPE zif_abapgit_git_definitions=>ty_comment.
+    ls_comment-committer-name = iv_author_name.
+    ls_comment-committer-email = iv_author_email.
+    ls_comment-comment = iv_message.
+    DATA(ls_push) = zcl_abapgit_git_porcelain=>push( is_comment = ls_comment
+                                                     io_stage = lo_stage
+                                                     it_old_objects = mt_objects
+                                                     iv_parent = mv_commit
+                                                     iv_url = mv_url
+                                                     iv_branch_name = mv_branch_ref ).
+    rv_commit = to_lower( ls_push-branch ).
   ENDMETHOD.
 
   METHOD check_push_access.
