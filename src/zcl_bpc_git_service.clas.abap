@@ -1,6 +1,6 @@
 "! bpcGit business logic: environments, the repository setup of an
-"! environment (table ZBPC_GIT_REPO) and the Git status of its EPM workbooks
-"! and logic scripts (docs/SPEC.md sections 3 and 6).
+"! environment (table ZBPC_GIT_REPO) and the Git status of its EPM workbooks,
+"! logic scripts, transformation and conversion files (docs/SPEC.md 3, 6).
 CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES ty_environments TYPE STANDARD TABLE OF uj_appset_id WITH DEFAULT KEY.
@@ -45,8 +45,10 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
       END OF ty_overview.
     CONSTANTS:
       BEGIN OF c_kind,
-        workbook TYPE string VALUE 'WORKBOOK',
-        script   TYPE string VALUE 'SCRIPT',
+        workbook       TYPE string VALUE 'WORKBOOK',
+        script         TYPE string VALUE 'SCRIPT',
+        transformation TYPE string VALUE 'TRANSFORMATION',
+        conversion     TYPE string VALUE 'CONVERSION',
       END OF c_kind.
     CONSTANTS:
       BEGIN OF c_status,
@@ -154,6 +156,22 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_script_type TYPE string VALUE 'LGF' ##NO_TEXT.
     "! Recognised workbook extensions; the file service stores them as DOCTYPE.
     CONSTANTS c_workbook_types TYPE string VALUE 'XLSX XLSM XLS XLTX XLTM' ##NO_TEXT.
+    "! Data Manager files below <model>\DATAMANAGER\ (and a team's DATAMANAGER):
+    "! a definition (.TDM, .CDM) and the Excel file it is maintained in.
+    CONSTANTS c_dm_folder TYPE string VALUE 'DATAMANAGER' ##NO_TEXT.
+    CONSTANTS c_transformation_folder TYPE string VALUE 'TRANSFORMATIONFILES' ##NO_TEXT.
+    CONSTANTS c_conversion_folder TYPE string VALUE 'CONVERSIONFILES' ##NO_TEXT.
+    CONSTANTS c_transformation_types TYPE string VALUE 'TDM XLS XLSX' ##NO_TEXT.
+    CONSTANTS c_conversion_types TYPE string VALUE 'CDM XLS XLSX' ##NO_TEXT.
+    TYPES:
+      BEGIN OF ty_folder,
+        "! Below \ROOT\WEBFOLDERS\<env>\, with trailing backslash
+        folder     TYPE string,
+        "! Document types to list, separated by spaces
+        types      TYPE string,
+        subfolders TYPE abap_bool,
+      END OF ty_folder,
+      ty_folders TYPE STANDARD TABLE OF ty_folder WITH DEFAULT KEY.
 
     "! Raises CX_UJ_NO_AUTH unless the user may access the environment.
     METHODS check_environment
@@ -167,25 +185,28 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS get_file_service
       IMPORTING iv_environment TYPE uj_appset_id
       RETURNING VALUE(ro_files) TYPE REF TO cl_ujf_file_service_mgr.
-    METHODS get_workbook_types
-      RETURNING VALUE(rt_types) TYPE string_table.
-    "! Workbooks and logic scripts of all models: workbooks below
-    "! <model>\EEXCEL\ (company) and <model>\TEAM FILES\<team>\EEXCEL\ (teams),
-    "! logic scripts in ADMINAPP\<model>\.
+    "! Tracked files of all models (section 3), each with its kind:
+    "! workbooks below <model>\EEXCEL\ and <model>\TEAM FILES\<team>\EEXCEL\,
+    "! logic scripts in ADMINAPP\<model>\, transformation and conversion files
+    "! below <model>\DATAMANAGER\ and <model>\TEAM FILES\<team>\DATAMANAGER\.
     METHODS list_workbooks
       IMPORTING iv_environment TYPE uj_appset_id
       RETURNING VALUE(rt_workbooks) TYPE ty_bpc_workbooks
       RAISING cx_uj_static_check.
-    "! True for a repository path <model>/EEXCEL/.../<name>.<workbook type>
-    "! or <model>/TEAM FILES/<team>/EEXCEL/.../<name>.<workbook type>.
-    METHODS is_workbook_path
+    "! Kind (c_kind) of a repository path, initial if bpcGit does not track it:
+    "!   <model>/EEXCEL/.../<name>.<workbook type>                   workbook
+    "!   ADMINAPP/<model>/<name>.LGF                                 logic script
+    "!   <model>/DATAMANAGER/TRANSFORMATIONFILES/.../<name>.TDM|XLS  transformation
+    "!   <model>/DATAMANAGER/CONVERSIONFILES/.../<name>.CDM|XLS      conversion
+    "! and the same below <model>/TEAM FILES/<team>/ instead of <model>/.
+    METHODS get_kind
       IMPORTING iv_path TYPE string
-      RETURNING VALUE(rv_workbook) TYPE abap_bool.
-    "! True for a repository path ADMINAPP/<model>/<name>.LGF.
-    METHODS is_script_path
-      IMPORTING iv_path TYPE string
-      RETURNING VALUE(rv_script) TYPE abap_bool.
-    "! Model of a repository path of a workbook or logic script.
+      RETURNING VALUE(rv_kind) TYPE string.
+    "! True if a space-separated type list contains the type.
+    METHODS has_type
+      IMPORTING iv_types TYPE string iv_type TYPE string
+      RETURNING VALUE(rv_found) TYPE abap_bool.
+    "! Model of a repository path of a tracked file.
     METHODS get_model
       IMPORTING iv_path TYPE string
       RETURNING VALUE(rv_model) TYPE string.
@@ -338,10 +359,9 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       APPEND ls_row TO rs_overview-workbooks.
     ENDLOOP.
 
-    " Files only in Git; others than workbooks and scripts (README.md) are not ours
+    " Files only in Git; untracked ones (README.md) are not ours
     LOOP AT ls_branch-files INTO ls_git.
-      DATA(lv_kind) = COND string( WHEN is_workbook_path( ls_git-path ) = abap_true THEN c_kind-workbook
-                                   WHEN is_script_path( ls_git-path ) = abap_true THEN c_kind-script ).
+      DATA(lv_kind) = get_kind( ls_git-path ).
       IF lv_kind IS INITIAL OR line_exists( lt_bpc[ path = ls_git-path ] ).
         CONTINUE.
       ENDIF.
@@ -649,21 +669,31 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
 
   METHOD list_workbooks.
     DATA lt_documents TYPE ujf_t_doc.
-    DATA lt_directories TYPE string_table.
+    DATA lt_types TYPE string_table.
     DATA lv_directory TYPE ujf_doctree-docname.
     DATA lv_doctype TYPE ujf_doc-doctype.
 
-    DATA(lt_types) = get_workbook_types( ).
     DATA(lt_models) = get_models( iv_environment ).
     DATA(lo_files) = get_file_service( iv_environment ).
     LOOP AT lt_models INTO DATA(lv_model).
-      DATA(lv_model_folder) = |\\ROOT\\WEBFOLDERS\\{ iv_environment }\\{ lv_model }\\|.
-      " Team folders also hold Data Manager files; is_workbook_path keeps
-      " only those below a team's EEXCEL folder.
-      lt_directories = VALUE #( ( lv_model_folder && c_webexcel_folder && `\` )
-                                ( lv_model_folder && c_team_folder && `\` ) ).
-      LOOP AT lt_directories INTO DATA(lv_folder).
-        lv_directory = lv_folder.
+      " Folders to list; get_kind decides what in them is tracked. Team folders
+      " are listed as a whole, as their libraries sit one level down.
+      DATA(lv_model_folder) = |{ lv_model }\\|.
+      DATA(lt_folders) = VALUE ty_folders(
+        ( folder = lv_model_folder && c_webexcel_folder && `\` types = c_workbook_types subfolders = abap_true )
+        ( folder = lv_model_folder && c_team_folder && `\`
+          types = |{ c_workbook_types } { c_transformation_types } { c_conversion_types }| subfolders = abap_true )
+        ( folder = lv_model_folder && c_dm_folder && `\` && c_transformation_folder && `\`
+          types = c_transformation_types subfolders = abap_true )
+        ( folder = lv_model_folder && c_dm_folder && `\` && c_conversion_folder && `\`
+          types = c_conversion_types subfolders = abap_true )
+        ( folder = |{ c_script_folder }\\{ lv_model }\\| types = c_script_type subfolders = abap_false ) ).
+
+      LOOP AT lt_folders INTO DATA(ls_folder).
+        lv_directory = |\\ROOT\\WEBFOLDERS\\{ iv_environment }\\{ ls_folder-folder }|.
+        SPLIT ls_folder-types AT space INTO TABLE lt_types.
+        SORT lt_types.
+        DELETE ADJACENT DUPLICATES FROM lt_types.
         " The file service lists one document type at a time
         LOOP AT lt_types INTO DATA(lv_type).
           lv_doctype = lv_type.
@@ -671,19 +701,20 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
           TRY.
               lo_files->list_directory(
                 EXPORTING i_dirname = lv_directory i_doctype = lv_doctype
-                          i_sort = abap_false i_include_subfldrs = abap_true
+                          i_sort = abap_false i_include_subfldrs = ls_folder-subfolders
                 IMPORTING et_document_list = lt_documents ).
             CATCH cx_ujf_file_service_error.
-              " A model without workbooks or teams has no such folder
+              " A model without such files has no such folder
               CLEAR lt_documents.
           ENDTRY.
           LOOP AT lt_documents INTO DATA(ls_document).
             DATA(lv_path) = to_path( iv_environment = iv_environment iv_docname = ls_document-docname ).
-            IF is_workbook_path( lv_path ) = abap_false.
+            DATA(lv_kind) = get_kind( lv_path ).
+            IF lv_kind IS INITIAL.
               CONTINUE.
             ENDIF.
             INSERT VALUE #( path        = lv_path
-                            kind        = c_kind-workbook
+                            kind        = lv_kind
                             docname     = ls_document-docname
                             model       = lv_model
                             lstmod_date = ls_document-lstmod_date
@@ -693,63 +724,53 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
           ENDLOOP.
         ENDLOOP.
       ENDLOOP.
-
-      " Logic scripts of the model; ADMINAPP has no subfolders
-      lv_directory = |\\ROOT\\WEBFOLDERS\\{ iv_environment }\\{ c_script_folder }\\{ lv_model }\\|.
-      lv_doctype = c_script_type.
-      CLEAR lt_documents.
-      TRY.
-          lo_files->list_directory(
-            EXPORTING i_dirname = lv_directory i_doctype = lv_doctype
-                      i_sort = abap_false i_include_subfldrs = abap_false
-            IMPORTING et_document_list = lt_documents ).
-        CATCH cx_ujf_file_service_error.
-          CLEAR lt_documents.
-      ENDTRY.
-      LOOP AT lt_documents INTO ls_document.
-        lv_path = to_path( iv_environment = iv_environment iv_docname = ls_document-docname ).
-        IF is_script_path( lv_path ) = abap_false.
-          CONTINUE.
-        ENDIF.
-        INSERT VALUE #( path        = lv_path
-                        kind        = c_kind-script
-                        docname     = ls_document-docname
-                        model       = lv_model
-                        lstmod_date = ls_document-lstmod_date
-                        lstmod_time = ls_document-lstmod_time
-                        lstmod_user = ls_document-lstmod_user
-                        size        = ls_document-doc_length ) INTO TABLE rt_workbooks.
-      ENDLOOP.
     ENDLOOP.
   ENDMETHOD.
 
-  METHOD is_script_path.
+  METHOD get_kind.
     DATA lt_parts TYPE string_table.
     SPLIT iv_path AT '/' INTO TABLE lt_parts.
-    rv_script = xsdbool( lines( lt_parts ) = 3 AND lt_parts[ 1 ] = c_script_folder
-                         AND to_upper( substring_after( val = iv_path sub = '.' occ = -1 ) ) = c_script_type ).
+    DATA(lv_count) = lines( lt_parts ).
+    DATA(lv_type) = to_upper( substring_after( val = iv_path sub = '.' occ = -1 ) ).
+    IF lv_count < 3 OR lv_type IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    IF lt_parts[ 1 ] = c_script_folder.
+      rv_kind = COND #( WHEN lv_count = 3 AND lv_type = c_script_type THEN c_kind-script ).
+      RETURN.
+    ENDIF.
+
+    " Index of the area folder (EEXCEL, DATAMANAGER): 2 for <model>/..., 4 for
+    " <model>/TEAM FILES/<team>/...; a file name must follow it
+    DATA(lv_area) = COND i( WHEN lt_parts[ 2 ] = c_team_folder THEN 4 ELSE 2 ).
+    IF lv_count <= lv_area.
+      RETURN.
+    ENDIF.
+    IF lt_parts[ lv_area ] = c_webexcel_folder AND has_type( iv_types = c_workbook_types iv_type = lv_type ) = abap_true.
+      rv_kind = c_kind-workbook.
+    ELSEIF lt_parts[ lv_area ] = c_dm_folder AND lv_count > lv_area + 1.
+      DATA(lv_dm_folder) = lt_parts[ lv_area + 1 ].
+      IF lv_dm_folder = c_transformation_folder
+          AND has_type( iv_types = c_transformation_types iv_type = lv_type ) = abap_true.
+        rv_kind = c_kind-transformation.
+      ELSEIF lv_dm_folder = c_conversion_folder
+          AND has_type( iv_types = c_conversion_types iv_type = lv_type ) = abap_true.
+        rv_kind = c_kind-conversion.
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD has_type.
+    DATA lt_types TYPE string_table.
+    SPLIT iv_types AT space INTO TABLE lt_types.
+    rv_found = xsdbool( line_exists( lt_types[ table_line = iv_type ] ) ).
   ENDMETHOD.
 
   METHOD get_model.
-    rv_model = COND #( WHEN is_script_path( iv_path ) = abap_true
+    rv_model = COND #( WHEN get_kind( iv_path ) = c_kind-script
                        THEN segment( val = iv_path index = 2 sep = '/' )
                        ELSE substring_before( val = iv_path sub = '/' ) ).
-  ENDMETHOD.
-
-  METHOD is_workbook_path.
-    DATA lt_parts TYPE string_table.
-    SPLIT iv_path AT '/' INTO TABLE lt_parts.
-    " Index of the EEXCEL folder: company <model>/EEXCEL/..., team
-    " <model>/TEAM FILES/<team>/EEXCEL/...; a file name must follow it
-    DATA(lv_webexcel) = COND i( WHEN lines( lt_parts ) >= 3 AND lt_parts[ 2 ] = c_webexcel_folder THEN 2
-                                WHEN lines( lt_parts ) >= 5 AND lt_parts[ 2 ] = c_team_folder
-                                     AND lt_parts[ 4 ] = c_webexcel_folder THEN 4 ).
-    IF lv_webexcel = 0 OR lines( lt_parts ) <= lv_webexcel.
-      RETURN.
-    ENDIF.
-    DATA(lv_type) = to_upper( substring_after( val = iv_path sub = '.' occ = -1 ) ).
-    DATA(lt_types) = get_workbook_types( ).
-    rv_workbook = xsdbool( line_exists( lt_types[ table_line = lv_type ] ) ).
   ENDMETHOD.
 
   METHOD get_team.
@@ -758,10 +779,6 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     IF lines( lt_parts ) >= 3 AND lt_parts[ 2 ] = c_team_folder.
       rv_team = lt_parts[ 3 ].
     ENDIF.
-  ENDMETHOD.
-
-  METHOD get_workbook_types.
-    SPLIT c_workbook_types AT space INTO TABLE rt_types.
   ENDMETHOD.
 
   METHOD to_docname.

@@ -22,7 +22,7 @@ environment to track, and then commits workbooks to Git or restores them from Gi
 
 ### Out of scope (v1)
 
-- Data Manager files (transformation, conversion, package),
+- Data Manager packages and data files,
   dimensions, BPF templates and the rest of the BPC content.
 - Private publications (`PRIVATEPUBLICATIONS\<user>\`) and temporary files.
 - Branch management, merging and conflict resolution inside the app. These
@@ -78,6 +78,29 @@ Added on 2026-10-03, after the workbooks, following bpcIO (`c_script_folder`):
 - Same statuses, commit and sync record as workbooks; the overview shows them
   with type "Logic script" and location "Admin". Being text, they get
   line-by-line diffs on GitHub.
+
+### 3.3 Transformation and conversion files
+
+Added on 2026-10-03, following bpcIO (`c_dm_folder`, `c_transformation_folder`,
+`c_conversion_folder`):
+
+| Kind | Folder below `\ROOT\WEBFOLDERS\<ENV>\` | Files |
+|---|---|---|
+| Transformation | `<MODEL>\DATAMANAGER\TRANSFORMATIONFILES\` | `<NAME>.TDM` + `<NAME>.XLS` |
+| Conversion | `<MODEL>\DATAMANAGER\CONVERSIONFILES\` | `<NAME>.CDM` + `<NAME>.XLS` |
+
+- Same below a team: `<MODEL>\TEAM FILES\<TEAM>\DATAMANAGER\...` (e.g. team
+  `INSTALLATION` on dev). Subfolders such as `BACKUP` are included (the
+  overview hides them by default, as for workbooks).
+- The `.XLS` is the Excel file the definition is maintained in; the
+  `.TDM`/`.CDM` is the processed definition Data Manager runs. Both are
+  tracked as separate files with the same statuses, commit and restore, so
+  they should be committed and restored together.
+- Files without an extension (one on dev,
+  `AGGR_PROJECT\...\CONVERSIONFILES\CONV_RESTORE_AGGR_PROJECT`) are not
+  tracked: Git paths are recognised by their extension.
+- One rule decides what is tracked, for BPC and Git alike:
+  `ZCL_BPC_GIT_SERVICE->GET_KIND` (path to kind).
 
 ## 4. User flows
 
