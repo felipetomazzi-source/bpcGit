@@ -1,5 +1,35 @@
 # bpcGit: functional specification (v0.1, draft)
 
+## Text diff (0.15.0)
+
+Select one logic script, transformation or conversion and choose Diff. The
+read-only POST `/diff` accepts environment, path and optional Git credentials,
+and returns the current branch head and current BPC/Git content parts. It checks
+environment/model access and membership in the current scoped overview before
+reading content. No sync baseline, content or Git commit is changed.
+
+The diff direction is Git to BPC: minus/red lines are Git content; plus/green
+lines are BPC content. Each part reports presence and byte size on both sides.
+New/deleted files compare against an absent side; empty present files remain
+distinguishable from missing files. Transformation/conversion workbook selections
+include their companion TDM/CDM using the same pairing rules as history/restore.
+Excel content is compared as binary, with an explicit changed/identical summary;
+cell/formula differences are not displayed. Missing companion definitions are
+reported, never silently assumed equal to the workbook. Direct TDM/CDM rows are
+also supported.
+
+Text supports UTF-8 and BOM-marked UTF-16, rejecting undecodable/binary content.
+The backend limits each text part to 1 MB; the UI limits combined text to 200,000
+characters and displays at most 2,000 rows, with explicit limit messages. LCS
+work is bounded to one million cells; larger changed blocks display remove/add
+blocks. CRLF/LF/CR are normalized only for display, and trailing newline changes
+remain visible. Byte comparison still reports line-ending-only differences.
+All source text is HTML-escaped before rendering, including script-like text.
+
+Regression checks cover edits, insertion/deletion, duplicate lines, missing/empty
+sides, final newline, line-ending normalization, bounded fallback, safe escaping,
+selection eligibility and stale responses after closing the dialog.
+
 ## 1. Goal
 
 bpcGit is a web app on the BPC system that puts BPC content under Git version

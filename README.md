@@ -1,5 +1,9 @@
 # bpcGit
 
+Select one logic script, transformation or conversion and click **Diff** to
+compare Git with current BPC text. Transformation/conversion workbooks include
+their companion definitions; Excel files show a binary change summary.
+
 Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
 package links, security definitions, BPF template designs and dimension members. The app is a UI5

@@ -7,6 +7,15 @@ its reason.
 
 ## Current update (2026-10-03)
 
+Version 0.15.0 adds Diff for one logic script, transformation or conversion.
+POST /diff reads the current Git head and BPC file(s), with environment/model
+access checks. Paired workbooks include their TDM/CDM text definitions; Excel
+bytes have a binary summary, not a cell diff. UI shows line numbers and escaped
+red/minus Git versus green/plus BPC text, with explicit large-content limits.
+Diff is read-only. Diff/scope/history regressions and ADT service syntax pass;
+HTTP syntax passes with a signature stand-in for the new service method before
+deployment. SAP browser validation is recorded below when completed.
+
 2026-10-04: `tests/opa` adds a local OPA5/QUnit browser harness against the real
 BSP frontend and pinned OpenUI5 1.52.48, with read-only mock responses. The first
 dimension-selection/load journey passes all seven assertions in Chromium driven

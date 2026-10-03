@@ -80,6 +80,27 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
       END OF c_status.
 
     TYPES ty_dimensions TYPE STANDARD TABLE OF uj_dim_name WITH DEFAULT KEY.
+    TYPES: BEGIN OF ty_diff_part,
+             path TYPE string,
+             in_bpc TYPE abap_bool,
+             in_git TYPE abap_bool,
+             changed TYPE abap_bool,
+             text_available TYPE abap_bool,
+             message TYPE string,
+             bpc_text TYPE string,
+             git_text TYPE string,
+             bpc_size TYPE i,
+             git_size TYPE i,
+           END OF ty_diff_part,
+           ty_diff_parts TYPE STANDARD TABLE OF ty_diff_part WITH DEFAULT KEY,
+           BEGIN OF ty_diff,
+             head TYPE string,
+             parts TYPE ty_diff_parts,
+           END OF ty_diff.
+    METHODS get_diff
+      IMPORTING iv_environment TYPE uj_appset_id io_remote TYPE REF TO zcl_bpc_git_remote iv_path TYPE string
+      RETURNING VALUE(rs_diff) TYPE ty_diff
+      RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
     METHODS available_dimensions IMPORTING iv_environment TYPE uj_appset_id
       RETURNING VALUE(rt_dimensions) TYPE ty_dimensions RAISING cx_uj_static_check.
     TYPES ty_models TYPE STANDARD TABLE OF uj_appl_id WITH DEFAULT KEY.
@@ -269,6 +290,8 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS history_paths
       IMPORTING iv_path TYPE string
       RETURNING VALUE(rt_paths) TYPE string_table.
+    METHODS decode_diff_text IMPORTING iv_content TYPE xstring
+      RETURNING VALUE(rv_text) TYPE string RAISING zcx_abapgit_exception.
     METHODS logical_path
       IMPORTING iv_path TYPE string it_files TYPE ty_workbooks
       RETURNING VALUE(rv_path) TYPE string.
@@ -622,6 +645,91 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       zcx_abapgit_exception=>raise( 'The selected item is no longer listed; reload the overview' ).
     ENDIF.
     rs_history = io_remote->history( iv_branch = ls_config-branch it_paths = history_paths( iv_path ) iv_depth = iv_depth ).
+  ENDMETHOD.
+
+  METHOD decode_diff_text.
+    IF xstrlen( iv_content ) > 1048576.
+      zcx_abapgit_exception=>raise( 'Text exceeds the 1 MB diff limit' ).
+    ENDIF.
+    IF iv_content IS INITIAL.
+      RETURN.
+    ENDIF.
+    TRY.
+        DATA(lv_content) = iv_content.
+        DATA(lv_encoding) = CONV string( 'UTF-8' ).
+        IF xstrlen( lv_content ) >= 2 AND lv_content(2) = 'FFFE'.
+          lv_encoding = 'UTF-16LE'.
+          lv_content = lv_content+2.
+        ELSEIF xstrlen( lv_content ) >= 2 AND lv_content(2) = 'FEFF'.
+          lv_encoding = 'UTF-16BE'.
+          lv_content = lv_content+2.
+        ELSEIF xstrlen( lv_content ) >= 3 AND lv_content(3) = 'EFBBBF'.
+          lv_content = lv_content+3.
+        ENDIF.
+        rv_text = cl_abap_codepage=>convert_from( source = lv_content codepage = lv_encoding ).
+        IF rv_text CS cl_abap_char_utilities=>minchar.
+          zcx_abapgit_exception=>raise( 'Content contains binary data' ).
+        ENDIF.
+      CATCH cx_sy_conversion_codepage cx_sy_codepage_converter_init INTO DATA(lx_encoding).
+        zcx_abapgit_exception=>raise( 'Content is not supported UTF-8 or BOM-marked UTF-16 text' ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD get_diff.
+    DATA(lv_kind) = get_kind( iv_path ).
+    IF lv_kind <> c_kind-script AND lv_kind <> c_kind-transformation AND lv_kind <> c_kind-conversion.
+      zcx_abapgit_exception=>raise( 'Diff is available for logic scripts, transformations and conversions' ).
+    ENDIF.
+    DATA(lv_model) = get_model( iv_path ).
+    DATA(lt_models) = available_models( iv_environment ).
+    IF lv_model IS INITIAL OR NOT line_exists( lt_models[ table_line = CONV uj_appl_id( lv_model ) ] ).
+      RAISE EXCEPTION TYPE cx_uj_no_auth.
+    ENDIF.
+    DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote
+      iv_individual = abap_true iv_kind = lv_kind iv_model = lv_model ).
+    IF NOT line_exists( ls_overview-workbooks[ path = iv_path ] ).
+      zcx_abapgit_exception=>raise( 'The selected item is no longer listed; reload the overview' ).
+    ENDIF.
+    rs_diff-head = ls_overview-commit.
+    DATA(lo_files) = get_file_service( iv_environment ).
+    LOOP AT history_paths( iv_path ) INTO DATA(lv_path).
+      DATA(ls_part) = VALUE ty_diff_part( path = lv_path ).
+      DATA lv_bpc TYPE xstring.
+      DATA lv_git TYPE xstring.
+      CLEAR: lv_bpc, lv_git.
+      READ TABLE ls_overview-workbooks INTO DATA(ls_file) WITH KEY path = lv_path.
+      IF sy-subrc = 0.
+        ls_part-in_bpc = ls_file-in_bpc.
+        ls_part-in_git = xsdbool( ls_file-git_sha1 IS NOT INITIAL ).
+        IF ls_part-in_bpc = abap_true.
+          lo_files->get_document( EXPORTING i_docname = ls_file-docname i_retzip = abap_false
+            IMPORTING e_document_content = lv_bpc ).
+        ENDIF.
+        IF ls_part-in_git = abap_true.
+          lv_git = io_remote->get_content( lv_path ).
+        ENDIF.
+      ENDIF.
+      ls_part-bpc_size = xstrlen( lv_bpc ).
+      ls_part-git_size = xstrlen( lv_git ).
+      ls_part-changed = xsdbool( ls_part-in_bpc <> ls_part-in_git OR lv_bpc <> lv_git ).
+      DATA(lv_ext) = to_upper( substring_after( val = lv_path sub = '.' occ = -1 ) ).
+      IF lv_ext = 'LGF' OR lv_ext = 'TDM' OR lv_ext = 'CDM'.
+        TRY.
+            ls_part-bpc_text = decode_diff_text( lv_bpc ).
+            ls_part-git_text = decode_diff_text( lv_git ).
+            ls_part-text_available = abap_true.
+          CATCH zcx_abapgit_exception INTO DATA(lx_text).
+            CLEAR: ls_part-bpc_text, ls_part-git_text.
+            ls_part-message = lx_text->get_text( ).
+        ENDTRY.
+        IF ls_part-in_bpc = abap_false AND ls_part-in_git = abap_false.
+          ls_part-message = 'Companion definition is missing in both BPC and Git'.
+        ENDIF.
+      ELSE.
+        ls_part-message = 'Excel workbook: binary comparison only. The companion definition is compared below; workbook cells are not shown'.
+      ENDIF.
+      APPEND ls_part TO rs_diff-parts.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD commit_workbooks.

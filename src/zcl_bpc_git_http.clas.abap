@@ -19,6 +19,7 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
         commit       TYPE string VALUE '/commit',
         restore      TYPE string VALUE '/restore',
         history      TYPE string VALUE '/history',
+        diff         TYPE string VALUE '/diff',
       END OF c_resource.
     "! Longest Git user name and access token accepted.
     CONSTANTS c_max_user TYPE i VALUE 255 ##NO_TEXT.
@@ -83,6 +84,7 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS handle_history
       IMPORTING io_service TYPE REF TO zcl_bpc_git_service
       RAISING cx_uj_static_check.
+    METHODS handle_diff IMPORTING io_service TYPE REF TO zcl_bpc_git_service RAISING cx_uj_static_check.
     METHODS read_history_depth
       RETURNING VALUE(rv_depth) TYPE i.
     "! Reads the paths field: one repository path per line. Answers 400 and
@@ -170,6 +172,10 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
           WHEN c_resource-history.
             IF require_method( c_method-post ).
               handle_history( lo_service ).
+            ENDIF.
+          WHEN c_resource-diff.
+            IF require_method( c_method-post ) = abap_true.
+              handle_diff( lo_service ).
             ENDIF.
           WHEN c_resource-restore.
             IF require_method( c_method-post ).
@@ -552,6 +558,44 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"head":` && quote( ls_history-head ) &&
       `,"truncated":` && COND string( WHEN ls_history-truncated = abap_true THEN `true` ELSE `false` ) &&
       `,"versions":[` && lv_json && `]}` ).
+  ENDMETHOD.
+
+  METHOD handle_diff.
+    DATA lv_environment TYPE uj_appset_id.
+    DATA ls_config TYPE zbpc_git_repo.
+    DATA lo_remote TYPE REF TO zcl_bpc_git_remote.
+    DATA lv_with_login TYPE abap_bool.
+    DATA(lv_path) = read_field( iv_name = 'path' iv_label = 'file path' iv_max_length = 255 ).
+    IF mv_invalid = abap_true.
+      RETURN.
+    ENDIF.
+    TRY.
+        create_remote( EXPORTING io_service = io_service
+          IMPORTING ev_environment = lv_environment es_config = ls_config
+                    eo_remote = lo_remote ev_with_login = lv_with_login ).
+        IF lo_remote IS NOT BOUND.
+          RETURN.
+        ENDIF.
+        DATA(ls_diff) = io_service->get_diff( iv_environment = lv_environment io_remote = lo_remote iv_path = lv_path ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_git).
+        respond_git_error( ix_error = lx_git iv_with_login = lv_with_login ).
+        RETURN.
+    ENDTRY.
+    DATA lv_json TYPE string.
+    DATA lv_separator TYPE string.
+    LOOP AT ls_diff-parts INTO DATA(ls_part).
+      lv_json = lv_json && lv_separator && `{"path":` && quote( ls_part-path ) &&
+        `,"inBpc":` && COND string( WHEN ls_part-in_bpc = abap_true THEN `true` ELSE `false` ) &&
+        `,"inGit":` && COND string( WHEN ls_part-in_git = abap_true THEN `true` ELSE `false` ) &&
+        `,"changed":` && COND string( WHEN ls_part-changed = abap_true THEN `true` ELSE `false` ) &&
+        `,"textAvailable":` && COND string( WHEN ls_part-text_available = abap_true THEN `true` ELSE `false` ) &&
+        `,"message":` && quote( ls_part-message ) &&
+        `,"bpcText":` && quote( ls_part-bpc_text ) && `,"gitText":` && quote( ls_part-git_text ) &&
+        `,"bpcSize":` && CONV string( ls_part-bpc_size ) && `,"gitSize":` && CONV string( ls_part-git_size ) && `}`.
+      lv_separator = ','.
+    ENDLOOP.
+    respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"head":` && quote( ls_diff-head ) &&
+      `,"parts":[` && lv_json && `]}` ).
   ENDMETHOD.
 
   METHOD read_paths.
