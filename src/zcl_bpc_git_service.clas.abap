@@ -54,6 +54,9 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS:
       BEGIN OF c_kind,
         workbook       TYPE string VALUE 'WORKBOOK',
+        team           TYPE string VALUE 'TEAM',
+        taskprofile    TYPE string VALUE 'TASKPROFILE',
+        dataprofile    TYPE string VALUE 'DATAPROFILE',
         script         TYPE string VALUE 'SCRIPT',
         transformation TYPE string VALUE 'TRANSFORMATION',
         conversion     TYPE string VALUE 'CONVERSION',
@@ -488,9 +491,13 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       APPEND ls_row TO rs_overview-workbooks.
     ENDLOOP.
 
+    DATA(lv_security_allowed) = zcl_bpc_git_security=>can_read( ).
     " Files only in Git; untracked ones (README.md) are not ours
     LOOP AT ls_branch-files INTO ls_git.
       DATA(lv_kind) = get_kind( ls_git-path ).
+      IF ls_git-path CP 'SECURITY/*' AND lv_security_allowed = abap_false.
+        CONTINUE.
+      ENDIF.
       IF lv_kind IS INITIAL OR matches_scope( iv_path = ls_git-path iv_kind = iv_kind ) = abap_false
           OR ( iv_model IS NOT INITIAL AND get_model( ls_git-path ) <> iv_model )
           OR line_exists( lt_bpc[ path = ls_git-path ] ).
@@ -500,6 +507,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       APPEND VALUE #(
         path    = ls_git-path
         kind    = lv_kind
+        generated = xsdbool( ls_git-path CP 'SECURITY/*' )
         model   = get_model( ls_git-path )
         team    = get_team( ls_git-path )
         docname = lv_docname
@@ -738,6 +746,9 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         ELSE.
           ls_snapshot_file-status = c_status-unchanged.
         ENDIF.
+        IF lv_snapshot_path CP 'SECURITY/*'.
+          ls_snapshot_file-generated = abap_true.
+        ENDIF.
         IF ls_snapshot_file-status <> c_status-unchanged.
           lv_operations = lv_operations + 1.
         ENDIF.
@@ -859,6 +870,14 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DATA lv_locked TYPE uj_flg.
     DATA lv_content TYPE xstring.
 
+    IF is_file-path CP 'SECURITY/*'.
+      DATA(lv_security_delete) = xsdbool( is_file-status = c_status-deleted_git ).
+      DATA(lv_security_xml) = COND xstring( WHEN lv_security_delete = abap_true THEN is_file-content
+        ELSE io_remote->get_content( is_file-path ) ).
+      rv_message = zcl_bpc_git_security=>restore( iv_environment = iv_environment iv_path = is_file-path
+        iv_xml = lv_security_xml iv_delete = lv_security_delete ).
+      RETURN.
+    ENDIF.
     IF is_file-kind = c_kind-package OR is_file-kind = c_kind-link.
       " To delete, the BPC version tells what; otherwise the Git version is written
       DATA(lv_delete) = xsdbool( is_file-status = c_status-deleted_git ).
@@ -1018,6 +1037,22 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DATA lv_doctype TYPE ujf_doc-doctype.
 
     DATA(lt_models) = get_models( iv_environment ).
+    DATA(lv_security_scope) = xsdbool( iv_kind = c_kind-team OR iv_kind = c_kind-taskprofile
+      OR iv_kind = c_kind-dataprofile ).
+    IF lv_security_scope = abap_true AND iv_model IS NOT INITIAL.
+      RAISE EXCEPTION TYPE cx_uj_static_check.
+    ENDIF.
+    IF iv_model IS INITIAL AND ( iv_kind IS INITIAL OR lv_security_scope = abap_true ).
+      DATA(lt_security) = zcl_bpc_git_security=>list( iv_environment = iv_environment iv_kind = iv_kind ).
+      LOOP AT lt_security INTO DATA(ls_security).
+        INSERT VALUE #( path = ls_security-path kind = ls_security-kind
+          docname = to_docname( iv_environment = iv_environment iv_path = ls_security-path )
+          generated = abap_true content = ls_security-content size = xstrlen( ls_security-content ) ) INTO TABLE rt_workbooks.
+      ENDLOOP.
+    ENDIF.
+    IF lv_security_scope = abap_true.
+      RETURN.
+    ENDIF.
     IF iv_model IS NOT INITIAL.
       IF NOT line_exists( lt_models[ table_line = iv_model ] ).
         RAISE EXCEPTION TYPE cx_uj_no_auth.
@@ -1212,6 +1247,10 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_kind.
+    IF iv_path CP 'SECURITY/*'.
+      rv_kind = zcl_bpc_git_security=>get_kind( iv_path ).
+      RETURN.
+    ENDIF.
     DATA lt_parts TYPE string_table.
     SPLIT iv_path AT '/' INTO TABLE lt_parts.
     DATA(lv_count) = lines( lt_parts ).
@@ -1591,6 +1630,9 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_model.
+    IF iv_path CP 'SECURITY/*'.
+      RETURN.
+    ENDIF.
     rv_model = COND #( WHEN get_kind( iv_path ) = c_kind-script
                        THEN segment( val = iv_path index = 2 sep = '/' )
                        ELSE substring_before( val = iv_path sub = '/' ) ).

@@ -504,3 +504,56 @@ reports/schedules list their specific library; team listings filter by the
 library directly beneath EEXCEL before comparing content. Git-only files use
 the same classification. Other covers books, distribution lists and remaining
 workbook paths; All objects continues to include all supported objects.
+
+## Security objects (0.12.0)
+
+User decisions: task profiles (not "test" profiles); transport definitions only,
+keep all users and assignments local. bpcIO has no security export provider.
+ADT inspection found native CL_UJE_TEAM, CL_UJE_PROFILE_TASK and
+CL_UJE_PROFILE_MEMACCESS APIs. Their mutations enforce
+CL_UJE_COMMON=>ENSURE_HAS_MANAGE_AUTHORITY, which checks BPC task P0011.
+
+ZCL_BPC_GIT_SECURITY exports one schema-version-1 native ABAP XML definition per
+logical ID. Paths: SECURITY/TEAMS/<escaped-id>.xml, SECURITY/TASKPROFILES/
+<escaped-id>.xml, SECURITY/DATAACCESSPROFILES/<escaped-id>.xml. Kind values are
+TEAM, TASKPROFILE, DATAPROFILE. These are environment-wide, with no model/team
+location. The model selector resets to All models and is disabled. API requests
+that combine a security kind with a model return 400. All objects plus a selected
+model excludes security; All objects/All models includes it for administrators.
+Nonadministrators cannot list security or Git-only security rows; explicit
+security requests fail authorization. Context is established for the environment
+before checking authority. Commit/History/restore recheck through scoped listing.
+
+Team payload: ID and description. Task profile payload: ID, description and task
+IDs. Data profile payload: logical ID plus UJE_S_MBR_PROF_DET, containing standard
+cube/dimension/member rules, attribute filters and matrix rules. PROFILE_AGR_NAME
+in that DTO is a logical caption, not an SAP-generated role; it is normalized to
+the logical ID. Users, leaders, team/profile assignments and user attributes are
+not exported or restored. Descriptions are in the current SAP session language;
+multilingual description transport is outside this release.
+
+Canonicalization sorts set-valued tables by their serialized deep rows and clears
+derived MEMBERDESC fields. Positional matrix DIMENSIONS and outer MEMBERS tables
+retain their order; member sets inside columns are sorted. No cell GUIDs, roles or
+timestamps are present in the API definition DTO. XML is indented for Git review.
+Generated rows are hashed on each overview comparison; sync remains per object.
+
+Restore validates schema version, kind, XML ID versus path, ID length and fields
+belonging to another kind. Teams use CREATE_TEAMS/UPDATE_TEAMS without assignment
+parameters. Task profiles use the user-manager factory (private task constructor)
+and CREATE/UPDATE with an explicit full task list. Data profiles use
+CREATE_MBR_PROFILES/UPDATE_MBR_PROFILES with complete rule sets. No profile owner
+update API is called. Models and standard/matrix mode are validated before saving
+data rules. Native APIs validate tasks and remaining references. Default task/data
+profiles are read-only for restore. Security deletion is refused to preserve
+local assignments and team folders. History reuses the same guards.
+
+The provider reads the definition back after mutation, canonicalizes and compares
+it with the requested version before marking synchronization. Failure triggers
+the existing restore rollback and no success baseline. Native role/cache side
+effects may extend beyond the database transaction; no broader atomicity is
+claimed. The new security provider was syntax-checked through ADT using an existing
+class context (name substitution only). Service integration used signature
+stand-ins for the new, not-yet-installed provider; HTTP checked directly. UI
+scope/location tests and existing history regressions pass. Full SAP activation
+and functional acceptance of native writes remain manual through abapGit/browser.

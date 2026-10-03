@@ -108,3 +108,40 @@ reports/schedules list their specific library; team listings filter by the
 library directly beneath EEXCEL before comparing content. Git-only files use
 the same classification. Other covers books, distribution lists and remaining
 workbook paths; All objects continues to include all supported objects.
+
+## Security definitions (0.12.0)
+
+The object type choices now include **Security: teams**, **Security: task
+profiles**, and **Security: data access profiles**. These apply to the whole
+environment; the model selector is disabled for them. Security administration
+permission (BPC task P0011) is required to list, commit, inspect history or restore
+these objects. All objects includes security only for authorized administrators
+when All models is selected; other users continue to see their usual objects.
+
+Each definition is a generated, readable XML file under `SECURITY/TEAMS/`,
+`SECURITY/TASKPROFILES/` or `SECURITY/DATAACCESSPROFILES/`. Teams track their ID
+and description; task profiles track description and task IDs; data access
+profiles track standard, attribute and matrix access rules across their models.
+Users, team leaders, profile assignments, emails and generated SAP role names
+are excluded. Descriptions use the SAP session language; use the same logon
+language when comparing across systems. This release does not transport other
+language translations.
+
+Restore creates missing definitions or updates existing ones using BPC APIs,
+preserves local users/assignments and checks the resulting definition before
+recording synchronization. New teams get BPC's normal folders; new teams and
+profiles have no user assignments. Built-in default profiles cannot be restored.
+Security deletion is deliberately refused: remove definitions in BPC, where the
+effect on local assignments and folders is visible. Missing models and matrix
+mode mismatches are rejected before a data access save. SAP validates remaining
+references through its native APIs. Security XML is canonicalized for comparison;
+matrix dimension/member column order is preserved.
+
+After abapGit pull and activation, test one custom object of each type: commit,
+edit the description/task/rule in BPC, restore, and refresh to Unchanged. Confirm
+the original local memberships, leaders and assignments remain intact. Also test
+creation of a new unassigned definition, History restore and a nonadministrator
+session. The implementation has ADT syntax and local UI checks; SAP/browser
+acceptance of security writes is still pending. Native security APIs update
+roles/caches as well as database definitions, so ordinary document locks do not
+apply and cross-system role side effects cannot be promised atomic rollback.

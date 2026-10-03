@@ -7,7 +7,7 @@ vm.runInNewContext(fs.readFileSync('src/zbpc_git.wapa.controller_-app.controller
     factory.apply(null, names.map(function (name) {
       return name.endsWith('/Controller') ? { extend: function (name, value) { methods = value; } } : {};
     }));
-  } } }, Date: Date, Math: Math, jQuery: {}
+  } } }, Date: Date, Math: Math, jQuery: { extend: Object.assign }
 });
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function fixture() {
@@ -93,6 +93,20 @@ const response = { branch: 'main', branchFound: true, commit: 'a'.repeat(40),
     f.instance.onRefreshWorkbooks();
     assert.equal(f.pending[1].params.kind, kind, 'refresh preserves the workbook library');
     f.pending[1].resolve(response); await tick();
+  }
+  for (const kind of ['TEAM', 'TASKPROFILE', 'DATAPROFILE']) {
+    f = fixture();
+    f.data.loadScope = { kind: kind, model: 'MODEL' };
+    f.instance.onLoadScopeChange();
+    assert.equal(f.data.loadScope.model, 'ALL', 'security objects cannot inherit a model restriction');
+    f.instance.onLoadWorkbooks();
+    assert.equal(f.pending[0].params.kind, kind);
+    assert.equal(f.pending[0].params.model, '', 'security requests target the environment');
+    f.pending[0].resolve(response); await tick();
+    const row = methods._toRow({ path: 'SECURITY/TEAMS/LOCAL.xml', kind: kind, model: '', team: '', status: 'UNCHANGED' });
+    assert.equal(row.type, kind, 'security types retain their own labels');
+    assert.equal(row.location, 'SECURITY');
+    assert.equal(row.committable, false);
   }
   console.log('Scoped loading UI regression checks passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

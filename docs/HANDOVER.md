@@ -26,6 +26,13 @@ User confirmed the prior restore/history workflow works. This release still
 needs abapGit pull/activation and browser acceptance, including scoped pairs,
 Git-only files, model switching, and first-load versus refresh timing.
 Version 0.11.1 adds optional All objects loading; EPM workbooks stays the default.
+Version 0.12.0 adds environment-wide security team, task profile and data access
+profile definitions through ZCL_BPC_GIT_SECURITY. Users/assignments stay local
+(explicit user choice). P0011 is required. XML is canonical and uses native BPC
+read/create/update APIs; deletion and default-profile restore are refused. ADT
+checked the provider in an existing class context, HTTP directly and service with
+new-provider signature stand-ins. UI/history checks pass. Security write acceptance
+must be tested after user pull/activation; no SAP objects/data were written by ADT.
 The sections below preserve the earlier session handover; use SPEC.md and
 AGENTS.md for current behavior and the authorized commit/push workflow.
 
