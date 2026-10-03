@@ -7,6 +7,10 @@ its reason.
 
 ## Current update (2026-10-03)
 
+0.15.1 extends Diff to Data Manager packages, comparing generated canonical
+package XML (settings and script representation) against Git without UJF reads
+for generated objects. Package selection enables the existing Diff dialog.
+
 Version 0.15.0 adds Diff for one logic script, transformation or conversion.
 POST /diff reads the current Git head and BPC file(s), with environment/model
 access checks. Paired workbooks include their TDM/CDM text definitions; Excel

@@ -2,7 +2,7 @@
 
 ## Text diff (0.15.0)
 
-Select one logic script, transformation or conversion and choose Diff. The
+Select one logic script, transformation, conversion or Data Manager package and choose Diff. The
 read-only POST `/diff` accepts environment, path and optional Git credentials,
 and returns the current branch head and current BPC/Git content parts. It checks
 environment/model access and membership in the current scoped overview before
@@ -17,6 +17,12 @@ Excel content is compared as binary, with an explicit changed/identical summary;
 cell/formula differences are not displayed. Missing companion definitions are
 reported, never silently assumed equal to the workbook. Direct TDM/CDM rows are
 also supported.
+
+Version 0.15.1 extends Diff to Data Manager packages. BPC content comes from
+the canonical generated package XML already used for commit and restore,
+including settings and the package's custom/default script representation.
+It is not read through UJF as a physical file. Git-only packages compare against
+an absent BPC side. Existing text limits, access checks and escaping apply.
 
 Text supports UTF-8 and BOM-marked UTF-16, rejecting undecodable/binary content.
 The backend limits each text part to 1 MB; the UI limits combined text to 200,000

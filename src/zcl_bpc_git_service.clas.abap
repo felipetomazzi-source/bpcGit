@@ -677,8 +677,9 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
 
   METHOD get_diff.
     DATA(lv_kind) = get_kind( iv_path ).
-    IF lv_kind <> c_kind-script AND lv_kind <> c_kind-transformation AND lv_kind <> c_kind-conversion.
-      zcx_abapgit_exception=>raise( 'Diff is available for logic scripts, transformations and conversions' ).
+    IF lv_kind <> c_kind-script AND lv_kind <> c_kind-transformation AND lv_kind <> c_kind-conversion
+        AND lv_kind <> c_kind-package.
+      zcx_abapgit_exception=>raise( 'Diff is available for logic scripts, transformations, conversions and packages' ).
     ENDIF.
     DATA(lv_model) = get_model( iv_path ).
     DATA(lt_models) = available_models( iv_environment ).
@@ -702,8 +703,12 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         ls_part-in_bpc = ls_file-in_bpc.
         ls_part-in_git = xsdbool( ls_file-git_sha1 IS NOT INITIAL ).
         IF ls_part-in_bpc = abap_true.
-          lo_files->get_document( EXPORTING i_docname = ls_file-docname i_retzip = abap_false
-            IMPORTING e_document_content = lv_bpc ).
+          IF ls_file-generated = abap_true.
+            lv_bpc = ls_file-content.
+          ELSE.
+            lo_files->get_document( EXPORTING i_docname = ls_file-docname i_retzip = abap_false
+              IMPORTING e_document_content = lv_bpc ).
+          ENDIF.
         ENDIF.
         IF ls_part-in_git = abap_true.
           lv_git = io_remote->get_content( lv_path ).
@@ -713,7 +718,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       ls_part-git_size = xstrlen( lv_git ).
       ls_part-changed = xsdbool( ls_part-in_bpc <> ls_part-in_git OR lv_bpc <> lv_git ).
       DATA(lv_ext) = to_upper( substring_after( val = lv_path sub = '.' occ = -1 ) ).
-      IF lv_ext = 'LGF' OR lv_ext = 'TDM' OR lv_ext = 'CDM'.
+      IF lv_ext = 'LGF' OR lv_ext = 'TDM' OR lv_ext = 'CDM' OR lv_kind = c_kind-package.
         TRY.
             ls_part-bpc_text = decode_diff_text( lv_bpc ).
             ls_part-git_text = decode_diff_text( lv_git ).
