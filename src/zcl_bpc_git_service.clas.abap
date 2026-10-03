@@ -1,14 +1,17 @@
 "! bpcGit business logic: environments, the repository setup of an
 "! environment (table ZBPC_GIT_REPO) and the Git status of its EPM workbooks
-"! (docs/SPEC.md sections 3 and 6).
+"! and logic scripts (docs/SPEC.md sections 3 and 6).
 CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES ty_environments TYPE STANDARD TABLE OF uj_appset_id WITH DEFAULT KEY.
     TYPES:
       BEGIN OF ty_workbook,
-        "! Repository path, e.g. AGGR_OPEX/EEXCEL/REPORTS/X.XLSX or
-        "! AGGR_OPEX/TEAM FILES/<team>/EEXCEL/REPORTS/X.XLSX
+        "! Repository path, e.g. AGGR_OPEX/EEXCEL/REPORTS/X.XLSX,
+        "! AGGR_OPEX/TEAM FILES/<team>/EEXCEL/REPORTS/X.XLSX or
+        "! ADMINAPP/AGGR_OPEX/CLEAR_DATA.LGF
         path       TYPE string,
+        "! One of c_kind
+        kind       TYPE string,
         model      TYPE string,
         "! Team folder of a team workbook; initial for company (public) ones
         team       TYPE string,
@@ -31,6 +34,11 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         commit       TYPE string,
         workbooks    TYPE ty_workbooks,
       END OF ty_overview.
+    CONSTANTS:
+      BEGIN OF c_kind,
+        workbook TYPE string VALUE 'WORKBOOK',
+        script   TYPE string VALUE 'SCRIPT',
+      END OF c_kind.
     CONSTANTS:
       BEGIN OF c_status,
         unchanged    TYPE string VALUE 'UNCHANGED',
@@ -60,7 +68,8 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING is_config TYPE zbpc_git_repo
       RETURNING VALUE(rv_message) TYPE string
       RAISING cx_uj_no_auth cx_uj_static_check.
-    "! Workbooks of the environment in BPC and in Git, each with its status.
+    "! Workbooks and logic scripts of the environment in BPC and in Git,
+    "! each with its status.
     "! BPC content is only read when its hash is needed for the status.
     METHODS get_overview
       IMPORTING iv_environment TYPE uj_appset_id
@@ -92,6 +101,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     TYPES:
       BEGIN OF ty_bpc_workbook,
         path        TYPE string,
+        kind        TYPE string,
         docname     TYPE uj_docname,
         model       TYPE string,
         lstmod_date TYPE uj_lstmod_date,
@@ -109,6 +119,10 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     "! of the team folders, which each have their own EEXCEL libraries.
     CONSTANTS c_webexcel_folder TYPE string VALUE 'EEXCEL' ##NO_TEXT.
     CONSTANTS c_team_folder TYPE string VALUE 'TEAM FILES' ##NO_TEXT.
+    "! Logic scripts: \ROOT\WEBFOLDERS\<env>\ADMINAPP\<model>\<name>.LGF. The
+    "! .LGX files next to them are compiled by BPC and are not tracked.
+    CONSTANTS c_script_folder TYPE string VALUE 'ADMINAPP' ##NO_TEXT.
+    CONSTANTS c_script_type TYPE string VALUE 'LGF' ##NO_TEXT.
     "! Recognised workbook extensions; the file service stores them as DOCTYPE.
     CONSTANTS c_workbook_types TYPE string VALUE 'XLSX XLSM XLS XLTX XLTM' ##NO_TEXT.
 
@@ -126,8 +140,9 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING VALUE(ro_files) TYPE REF TO cl_ujf_file_service_mgr.
     METHODS get_workbook_types
       RETURNING VALUE(rt_types) TYPE string_table.
-    "! Workbooks of all models: below <model>\EEXCEL\ (company) and below
-    "! <model>\TEAM FILES\<team>\EEXCEL\ (teams).
+    "! Workbooks and logic scripts of all models: workbooks below
+    "! <model>\EEXCEL\ (company) and <model>\TEAM FILES\<team>\EEXCEL\ (teams),
+    "! logic scripts in ADMINAPP\<model>\.
     METHODS list_workbooks
       IMPORTING iv_environment TYPE uj_appset_id
       RETURNING VALUE(rt_workbooks) TYPE ty_bpc_workbooks
@@ -137,6 +152,14 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS is_workbook_path
       IMPORTING iv_path TYPE string
       RETURNING VALUE(rv_workbook) TYPE abap_bool.
+    "! True for a repository path ADMINAPP/<model>/<name>.LGF.
+    METHODS is_script_path
+      IMPORTING iv_path TYPE string
+      RETURNING VALUE(rv_script) TYPE abap_bool.
+    "! Model of a repository path of a workbook or logic script.
+    METHODS get_model
+      IMPORTING iv_path TYPE string
+      RETURNING VALUE(rv_model) TYPE string.
     "! Team folder of a repository path; initial for company workbooks.
     METHODS get_team
       IMPORTING iv_path TYPE string
@@ -239,6 +262,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     LOOP AT lt_bpc INTO DATA(ls_bpc).
       DATA(ls_row) = VALUE ty_workbook(
         path       = ls_bpc-path
+        kind       = ls_bpc-kind
         model      = ls_bpc-model
         team       = get_team( ls_bpc-path )
         in_bpc     = abap_true
@@ -262,15 +286,18 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       APPEND ls_row TO rs_overview-workbooks.
     ENDLOOP.
 
-    " Workbooks only in Git; other files such as README.md are not ours
+    " Files only in Git; others than workbooks and scripts (README.md) are not ours
     LOOP AT ls_branch-files INTO ls_git.
-      IF line_exists( lt_bpc[ path = ls_git-path ] ) OR is_workbook_path( ls_git-path ) = abap_false.
+      DATA(lv_kind) = COND string( WHEN is_workbook_path( ls_git-path ) = abap_true THEN c_kind-workbook
+                                   WHEN is_script_path( ls_git-path ) = abap_true THEN c_kind-script ).
+      IF lv_kind IS INITIAL OR line_exists( lt_bpc[ path = ls_git-path ] ).
         CONTINUE.
       ENDIF.
       DATA(lv_docname) = to_docname( iv_environment = iv_environment iv_path = ls_git-path ).
       APPEND VALUE #(
         path    = ls_git-path
-        model   = substring_before( val = ls_git-path sub = '/' )
+        kind    = lv_kind
+        model   = get_model( ls_git-path )
         team    = get_team( ls_git-path )
         docname = lv_docname
         status  = COND #( WHEN line_exists( lt_states[ docname = lv_docname ] )
@@ -431,6 +458,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
               CONTINUE.
             ENDIF.
             INSERT VALUE #( path        = lv_path
+                            kind        = c_kind-workbook
                             docname     = ls_document-docname
                             model       = lv_model
                             lstmod_date = ls_document-lstmod_date
@@ -440,7 +468,47 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
           ENDLOOP.
         ENDLOOP.
       ENDLOOP.
+
+      " Logic scripts of the model; ADMINAPP has no subfolders
+      lv_directory = |\\ROOT\\WEBFOLDERS\\{ iv_environment }\\{ c_script_folder }\\{ lv_model }\\|.
+      lv_doctype = c_script_type.
+      CLEAR lt_documents.
+      TRY.
+          lo_files->list_directory(
+            EXPORTING i_dirname = lv_directory i_doctype = lv_doctype
+                      i_sort = abap_false i_include_subfldrs = abap_false
+            IMPORTING et_document_list = lt_documents ).
+        CATCH cx_ujf_file_service_error.
+          CLEAR lt_documents.
+      ENDTRY.
+      LOOP AT lt_documents INTO ls_document.
+        lv_path = to_path( iv_environment = iv_environment iv_docname = ls_document-docname ).
+        IF is_script_path( lv_path ) = abap_false.
+          CONTINUE.
+        ENDIF.
+        INSERT VALUE #( path        = lv_path
+                        kind        = c_kind-script
+                        docname     = ls_document-docname
+                        model       = lv_model
+                        lstmod_date = ls_document-lstmod_date
+                        lstmod_time = ls_document-lstmod_time
+                        lstmod_user = ls_document-lstmod_user
+                        size        = ls_document-doc_length ) INTO TABLE rt_workbooks.
+      ENDLOOP.
     ENDLOOP.
+  ENDMETHOD.
+
+  METHOD is_script_path.
+    DATA lt_parts TYPE string_table.
+    SPLIT iv_path AT '/' INTO TABLE lt_parts.
+    rv_script = xsdbool( lines( lt_parts ) = 3 AND lt_parts[ 1 ] = c_script_folder
+                         AND to_upper( substring_after( val = iv_path sub = '.' occ = -1 ) ) = c_script_type ).
+  ENDMETHOD.
+
+  METHOD get_model.
+    rv_model = COND #( WHEN is_script_path( iv_path ) = abap_true
+                       THEN segment( val = iv_path index = 2 sep = '/' )
+                       ELSE substring_before( val = iv_path sub = '/' ) ).
   ENDMETHOD.
 
   METHOD is_workbook_path.

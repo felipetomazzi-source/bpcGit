@@ -22,7 +22,7 @@ environment to track, and then commits workbooks to Git or restores them from Gi
 
 ### Out of scope (v1)
 
-- Logic scripts, Data Manager files (transformation, conversion, package),
+- Data Manager files (transformation, conversion, package),
   dimensions, BPF templates and the rest of the BPC content.
 - Private publications (`PRIVATEPUBLICATIONS\<user>\`) and temporary files.
 - Branch management, merging and conflict resolution inside the app. These
@@ -31,7 +31,9 @@ environment to track, and then commits workbooks to Git or restores them from Gi
   protocol over HTTPS, so Bitbucket and GitLab should also work, but v1 is
   tested only against GitHub.
 
-## 3. What counts as an EPM workbook
+## 3. What is tracked
+
+### 3.1 EPM workbooks
 
 Workbooks live in the BPC file service (package `UJF`). Tables `UJF_DOCTREE`
 (folders and documents) and `UJF_DOC` (attributes and content) hold them.
@@ -63,6 +65,19 @@ In both locations the libraries are `REPORTS`, `INPUT SCHEDULES`, `BOOKS` and
 
 On the dev system, `CH_PLANNING\AGGR_OPEX\EEXCEL\` contains files of this kind,
 together with many `BACKUP\` folders and `COPY OF ...` files. See open question Q3.
+
+### 3.2 Logic scripts
+
+Added on 2026-10-03, after the workbooks, following bpcIO (`c_script_folder`):
+
+- Location: `\ROOT\WEBFOLDERS\<ENV>\ADMINAPP\<MODEL>\<NAME>.LGF`, flat (no
+  subfolders). Repository path: `ADMINAPP/<MODEL>/<NAME>.LGF`.
+- Only the `.LGF` source is tracked. The `.LGX` files in the same folders are
+  compiled by BPC (generated names such as `0D5SGVJ..._DEFAULT.LGX`) and are
+  ignored.
+- Same statuses, commit and sync record as workbooks; the overview shows them
+  with type "Logic script" and location "Admin". Being text, they get
+  line-by-line diffs on GitHub.
 
 ## 4. User flows
 

@@ -272,6 +272,7 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     LOOP AT ls_overview-workbooks INTO DATA(ls_workbook).
       lv_json = lv_json && lv_separator &&
         `{"path":` && quote( ls_workbook-path ) &&
+        `,"kind":` && quote( ls_workbook-kind ) &&
         `,"model":` && quote( ls_workbook-model ) &&
         `,"team":` && quote( ls_workbook-team ) &&
         `,"status":` && quote( ls_workbook-status ) &&
