@@ -109,4 +109,13 @@ const response = { branch: 'main', branchFound: true, commit: 'a'.repeat(40),
     assert.equal(row.committable, false);
   }
   console.log('Scoped loading UI regression checks passed');
+  for (const [file, display] of [['Capital%20Contribution.xml', 'Capital Contribution.xml'],
+    ['Caf%C3%A9.xml', 'Café.xml'], ['Rate%2520.xml', 'Rate%20.xml'], ['Bad%ZZ.xml', 'Bad%ZZ.xml']]) {
+    const originalPath = 'SECURITY/TEAMS/' + file;
+    const row = methods._toRow({ path: originalPath, kind: 'TEAM', model: '', team: '', status: 'NEW_BPC' });
+    assert.equal(row.name, display);
+    assert.equal(row.path, originalPath, 'display decoding must never change commit/restore identity');
+  }
+  const workbook = methods._toRow({ path: 'MODEL/EEXCEL/REPORTS/Rate%20.xml', kind: 'WORKBOOK', status: 'NEW_BPC' });
+  assert.equal(workbook.name, 'Rate%20.xml', 'ordinary file names remain literal');
 })().catch(error => { console.error(error); process.exitCode = 1; });

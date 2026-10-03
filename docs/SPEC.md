@@ -557,3 +557,8 @@ class context (name substitution only). Service integration used signature
 stand-ins for the new, not-yet-installed provider; HTTP checked directly. UI
 scope/location tests and existing history regressions pass. Full SAP activation
 and functional acceptance of native writes remain manual through abapGit/browser.
+
+Version 0.12.1 decodes percent-encoded security filenames for display and name
+search (spaces and UTF-8 characters). Repository paths and action identities
+remain encoded. Other file names are literal; malformed encodings fall back
+to their original text instead of breaking the overview.
