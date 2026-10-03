@@ -100,3 +100,11 @@ an application server and is a best-effort optimization.
 
 Version 0.11.1 adds **All objects** to the type choices. EPM workbooks remains
 the default; All objects loads every supported type in the selected model scope.
+
+Version 0.11.2 replaces the combined EPM workbook load choice with EPM reports
+(default), EPM input schedules and Other EPM workbooks. The API accepts REPORT,
+SCHEDULE and OTHER scopes while retaining WORKBOOK for older clients. Company
+reports/schedules list their specific library; team listings filter by the
+library directly beneath EEXCEL before comparing content. Git-only files use
+the same classification. Other covers books, distribution lists and remaining
+workbook paths; All objects continues to include all supported objects.

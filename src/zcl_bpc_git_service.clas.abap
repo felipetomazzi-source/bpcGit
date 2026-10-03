@@ -251,6 +251,9 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     "!   <model>/DATAMANAGER/TRANSFORMATIONFILES/.../<name>.TDM|XLS  transformation
     "!   <model>/DATAMANAGER/CONVERSIONFILES/.../<name>.CDM|XLS      conversion
     "! and the same below <model>/TEAM FILES/<team>/ instead of <model>/.
+    METHODS matches_scope
+      IMPORTING iv_path TYPE string iv_kind TYPE string
+      RETURNING VALUE(rv_matches) TYPE abap_bool.
     METHODS selection_scope
       IMPORTING it_paths TYPE string_table
       EXPORTING ev_kind TYPE string ev_model TYPE string.
@@ -488,7 +491,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     " Files only in Git; untracked ones (README.md) are not ours
     LOOP AT ls_branch-files INTO ls_git.
       DATA(lv_kind) = get_kind( ls_git-path ).
-      IF lv_kind IS INITIAL OR ( iv_kind IS NOT INITIAL AND lv_kind <> iv_kind )
+      IF lv_kind IS INITIAL OR matches_scope( iv_path = ls_git-path iv_kind = iv_kind ) = abap_false
           OR ( iv_model IS NOT INITIAL AND get_model( ls_git-path ) <> iv_model )
           OR line_exists( lt_bpc[ path = ls_git-path ] ).
         CONTINUE.
@@ -511,6 +514,29 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     ENDIF.
     GET RUN TIME FIELD lv_end.
     rs_overview-compare_ms = ( lv_end - lv_start ) / 1000.
+  ENDMETHOD.
+
+  METHOD matches_scope.
+    DATA(lv_kind) = get_kind( iv_path ).
+    IF lv_kind IS INITIAL.
+      RETURN.
+    ENDIF.
+    IF iv_kind <> 'REPORT' AND iv_kind <> 'SCHEDULE' AND iv_kind <> 'OTHER'.
+      rv_matches = xsdbool( iv_kind IS INITIAL OR iv_kind = lv_kind ).
+      RETURN.
+    ENDIF.
+    IF lv_kind <> c_kind-workbook.
+      RETURN.
+    ENDIF.
+    DATA lt_parts TYPE string_table.
+    SPLIT iv_path AT '/' INTO TABLE lt_parts.
+    DATA(lv_library) = COND i( WHEN lt_parts[ 2 ] = c_team_folder THEN 5 ELSE 3 ).
+    DATA(lv_subtype) = CONV string( 'OTHER' ).
+    IF lines( lt_parts ) > lv_library.
+      lv_subtype = SWITCH #( lt_parts[ lv_library ]
+        WHEN 'REPORTS' THEN 'REPORT' WHEN 'INPUT SCHEDULES' THEN 'SCHEDULE' ELSE 'OTHER' ).
+    ENDIF.
+    rv_matches = xsdbool( iv_kind = lv_subtype ).
   ENDMETHOD.
 
   METHOD selection_scope.
@@ -1005,11 +1031,15 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       DATA(lv_model_folder) = |{ lv_model }\\|.
       DATA lt_folders TYPE ty_folders.
       CLEAR lt_folders.
-      IF iv_kind IS INITIAL OR iv_kind = c_kind-workbook.
-        APPEND VALUE #( folder = lv_model_folder && c_webexcel_folder && `\`
+      DATA(lv_workbook_scope) = xsdbool( iv_kind = c_kind-workbook OR iv_kind = 'REPORT'
+        OR iv_kind = 'SCHEDULE' OR iv_kind = 'OTHER' ).
+      IF iv_kind IS INITIAL OR lv_workbook_scope = abap_true.
+        APPEND VALUE #( folder = lv_model_folder && c_webexcel_folder && `\` &&
+          COND string( WHEN iv_kind = 'REPORT' THEN `REPORTS\`
+            WHEN iv_kind = 'SCHEDULE' THEN `INPUT SCHEDULES\` )
           types = c_workbook_types subfolders = abap_true ) TO lt_folders.
       ENDIF.
-      DATA(lv_team_types) = COND string( WHEN iv_kind = c_kind-workbook THEN c_workbook_types
+      DATA(lv_team_types) = COND string( WHEN lv_workbook_scope = abap_true THEN c_workbook_types
         WHEN iv_kind = c_kind-transformation THEN c_transformation_types
         WHEN iv_kind = c_kind-conversion THEN c_conversion_types
         WHEN iv_kind IS INITIAL THEN |{ c_workbook_types } { c_transformation_types } { c_conversion_types }| ).
@@ -1051,7 +1081,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
           LOOP AT lt_documents INTO DATA(ls_document).
             DATA(lv_path) = to_path( iv_environment = iv_environment iv_docname = ls_document-docname ).
             DATA(lv_kind) = get_kind( lv_path ).
-            IF lv_kind IS INITIAL OR ( iv_kind IS NOT INITIAL AND lv_kind <> iv_kind ).
+            IF lv_kind IS INITIAL OR matches_scope( iv_path = lv_path iv_kind = iv_kind ) = abap_false.
               CONTINUE.
             ENDIF.
             INSERT VALUE #( path        = lv_path

@@ -496,3 +496,11 @@ measures it. Parallel processing remains deferred until SAP measurements justify
 Version 0.11.1 offers All objects (`ALL` in the UI, empty API `kind`) alongside
 the six types. EPM workbooks remains the default. The optional model still
 restricts the scan; All models plus All objects performs the full comparison.
+
+Version 0.11.2 replaces the combined EPM workbook load choice with EPM reports
+(default), EPM input schedules and Other EPM workbooks. The API accepts REPORT,
+SCHEDULE and OTHER scopes while retaining WORKBOOK for older clients. Company
+reports/schedules list their specific library; team listings filter by the
+library directly beneath EEXCEL before comparing content. Git-only files use
+the same classification. Other covers books, distribution lists and remaining
+workbook paths; All objects continues to include all supported objects.

@@ -337,3 +337,11 @@ plus `ZCL_ABAPGIT_GIT_PACK` (decode commits). The other route is
 - `README.md`: the API table and build steps.
 - `tools/abapgit_fmt.py`: the byte-format helper.
 - `src/`: all abapGit objects (`.abapgit.xml` has `STARTING_FOLDER /src/`).
+
+Version 0.11.2 replaces the combined EPM workbook load choice with EPM reports
+(default), EPM input schedules and Other EPM workbooks. The API accepts REPORT,
+SCHEDULE and OTHER scopes while retaining WORKBOOK for older clients. Company
+reports/schedules list their specific library; team listings filter by the
+library directly beneath EEXCEL before comparing content. Git-only files use
+the same classification. Other covers books, distribution lists and remaining
+workbook paths; All objects continues to include all supported objects.

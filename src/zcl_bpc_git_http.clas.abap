@@ -303,6 +303,7 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       RETURN.
     ENDIF.
     IF lv_kind IS NOT INITIAL AND lv_kind <> 'WORKBOOK' AND lv_kind <> 'SCRIPT'
+        AND lv_kind <> 'REPORT' AND lv_kind <> 'SCHEDULE' AND lv_kind <> 'OTHER'
         AND lv_kind <> 'TRANSFORMATION' AND lv_kind <> 'CONVERSION' AND lv_kind <> 'PACKAGE' AND lv_kind <> 'LINK'.
       respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'Choose a supported object type' ).
       RETURN.

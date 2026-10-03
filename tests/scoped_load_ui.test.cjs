@@ -84,5 +84,15 @@ const response = { branch: 'main', branchFound: true, commit: 'a'.repeat(40),
   f.data.environment = 'OTHER';
   f.pending[0].resolve({ configured: true }); await tick();
   assert.equal(f.pending.length, 1, 'stale configuration must not start metadata or Git requests');
+  for (const kind of ['REPORT', 'SCHEDULE', 'OTHER']) {
+    f = fixture();
+    f.data.loadScope = { kind: kind, model: 'MODEL' };
+    f.instance.onLoadWorkbooks();
+    assert.equal(f.pending[0].params.kind, kind, 'workbook library scope reaches SAP');
+    f.pending[0].resolve(response); await tick();
+    f.instance.onRefreshWorkbooks();
+    assert.equal(f.pending[1].params.kind, kind, 'refresh preserves the workbook library');
+    f.pending[1].resolve(response); await tick();
+  }
   console.log('Scoped loading UI regression checks passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
