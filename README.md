@@ -2,7 +2,7 @@
 
 Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
-package links, security definitions and BPF template designs. The app is a UI5
+package links, security definitions, BPF template designs and dimension members. The app is a UI5
 BSP application, installed with abapGit into
 package `ZBPC_GIT` on the development system.
 
@@ -25,10 +25,11 @@ Base path: `/sap/bc/zbpc_git` (handler `ZCL_BPC_GIT_HTTP`)
 | GET | `/ping` | Caller, system, client and the installed abapGit version |
 | GET | `/environments` | BPC environments the user may access |
 | GET | `/models?environment=<id>` | Authorized models; no Git pull or file comparison |
+| GET | `/dimensions?environment=<id>` | Supported accessible dimensions; no member scan or Git comparison |
 | GET | `/config?environment=<id>` | Repository setup of an environment |
 | POST | `/config` | Save it (`environment`, `url`, `branch`) |
 | POST | `/connection` | Test the connection (`environment`; optional `user`, `token`) |
-| POST | `/workbooks` | Tracked files in BPC and Git with their status (`environment`; optional `kind`, `model`, `user`, `token`); returns stage timings |
+| POST | `/workbooks` | Tracked files in BPC and Git with their status (`environment`; optional `kind`, `model`, `dimension`, `user`, `token`); returns stage timings |
 | POST | `/commit` | Commit selected files (`environment`, `message`, `commit` = head seen, `paths` one per line; `user`, `token`) |
 | POST | `/restore` | Write a Git version into BPC (`environment`, `commit` = head seen, `paths`; optional `version`, `depth`, `user`, `token`) |
 | POST | `/history` | Changes to one item (`environment`, `path`; optional `depth`, `user`, `token`) |
@@ -159,3 +160,17 @@ Activity workspace links resolve by local name/type; the workspace contents must
 already exist in the target environment. Close the BPF editor before restoring.
 Template deletion/archive stays in BPC. See the BPF section of the specification
 for limitations and the SAP acceptance checklist.
+
+## Dimension members
+
+Choose **Dimension members**, select a dimension, then **Load**. Each member has
+its own Git status, commit, history and restore under `DIMENSIONS/<dimension>/MEMBERS/`.
+Dimensions are shared across models, so Model is disabled. Manage Dimensions or
+Manage Members permission is required. This release supports regular dimensions;
+time-dependent and reference dimensions are excluded.
+
+Restore adds/updates selected members in the **BPC working copy**, preserving
+other local members. Validate and process the dimension in BPC afterward.
+Properties/hierarchies must already exist with a matching schema, and referenced
+parents/members should be available first. Descriptions use the SAP session
+language. Member deletion and transaction data remain outside Git restore.

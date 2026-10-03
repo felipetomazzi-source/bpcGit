@@ -55,6 +55,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
       BEGIN OF c_kind,
         workbook       TYPE string VALUE 'WORKBOOK',
         bpf            TYPE string VALUE 'BPF',
+        dimmember      TYPE string VALUE 'DIMMEMBER',
         team           TYPE string VALUE 'TEAM',
         taskprofile    TYPE string VALUE 'TASKPROFILE',
         dataprofile    TYPE string VALUE 'DATAPROFILE',
@@ -78,6 +79,9 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         differs      TYPE string VALUE 'DIFFERS',
       END OF c_status.
 
+    TYPES ty_dimensions TYPE STANDARD TABLE OF uj_dim_name WITH DEFAULT KEY.
+    METHODS available_dimensions IMPORTING iv_environment TYPE uj_appset_id
+      RETURNING VALUE(rt_dimensions) TYPE ty_dimensions RAISING cx_uj_static_check.
     TYPES ty_models TYPE STANDARD TABLE OF uj_appl_id WITH DEFAULT KEY.
     METHODS available_models
       IMPORTING iv_environment TYPE uj_appset_id
@@ -107,6 +111,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_individual TYPE abap_bool DEFAULT abap_false
                 iv_kind TYPE string OPTIONAL
                 iv_model TYPE string OPTIONAL
+                iv_dimension TYPE string OPTIONAL
       RETURNING VALUE(rs_overview) TYPE ty_overview
       RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
     METHODS get_history
@@ -246,7 +251,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     "! below <model>\DATAMANAGER\ and <model>\TEAM FILES\<team>\DATAMANAGER\.
     METHODS list_workbooks
       IMPORTING iv_environment TYPE uj_appset_id
-                iv_kind TYPE string OPTIONAL iv_model TYPE string OPTIONAL
+                iv_kind TYPE string OPTIONAL iv_model TYPE string OPTIONAL iv_dimension TYPE string OPTIONAL
       RETURNING VALUE(rt_workbooks) TYPE ty_bpc_workbooks
       RAISING cx_uj_static_check zcx_abapgit_exception.
     "! Kind (c_kind) of a repository path, initial if bpcGit does not track it:
@@ -260,7 +265,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING VALUE(rv_matches) TYPE abap_bool.
     METHODS selection_scope
       IMPORTING it_paths TYPE string_table
-      EXPORTING ev_kind TYPE string ev_model TYPE string.
+      EXPORTING ev_kind TYPE string ev_model TYPE string ev_dimension TYPE string.
     METHODS history_paths
       IMPORTING iv_path TYPE string
       RETURNING VALUE(rt_paths) TYPE string_table.
@@ -383,6 +388,12 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DELETE ADJACENT DUPLICATES FROM rt_environments.
   ENDMETHOD.
 
+  METHOD available_dimensions.
+    check_environment( iv_environment ).
+    get_models( iv_environment ).
+    rt_dimensions = zcl_bpc_git_members=>dimensions( iv_environment ).
+  ENDMETHOD.
+
   METHOD available_models.
     check_environment( iv_environment ).
     rt_models = get_models( iv_environment ).
@@ -444,7 +455,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DATA lv_start TYPE i.
     DATA lv_end TYPE i.
     GET RUN TIME FIELD lv_start.
-    DATA(lt_bpc) = list_workbooks( iv_environment = iv_environment iv_kind = iv_kind iv_model = iv_model ).
+    DATA(lt_bpc) = list_workbooks( iv_environment = iv_environment iv_kind = iv_kind iv_model = iv_model iv_dimension = iv_dimension ).
     GET RUN TIME FIELD lv_end.
     rs_overview-bpc_ms = ( lv_end - lv_start ) / 1000.
     GET RUN TIME FIELD lv_start.
@@ -493,16 +504,19 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     ENDLOOP.
 
     DATA(lv_security_allowed) = zcl_bpc_git_security=>can_read( ).
+    DATA(lv_members_allowed) = zcl_bpc_git_members=>can_read( ).
     DATA(lv_bpf_allowed) = zcl_bpc_git_bpf=>can_read( ).
     " Files only in Git; untracked ones (README.md) are not ours
     LOOP AT ls_branch-files INTO ls_git.
       DATA(lv_kind) = get_kind( ls_git-path ).
       IF ( ls_git-path CP 'SECURITY/*' AND lv_security_allowed = abap_false )
-          OR ( lv_kind = c_kind-bpf AND lv_bpf_allowed = abap_false ).
+          OR ( lv_kind = c_kind-bpf AND lv_bpf_allowed = abap_false )
+          OR ( lv_kind = c_kind-dimmember AND lv_members_allowed = abap_false ).
         CONTINUE.
       ENDIF.
       IF lv_kind IS INITIAL OR matches_scope( iv_path = ls_git-path iv_kind = iv_kind ) = abap_false
           OR ( iv_model IS NOT INITIAL AND get_model( ls_git-path ) <> iv_model )
+          OR ( iv_dimension IS NOT INITIAL AND zcl_bpc_git_members=>get_dimension( ls_git-path ) <> iv_dimension )
           OR line_exists( lt_bpc[ path = ls_git-path ] ).
         CONTINUE.
       ENDIF.
@@ -510,7 +524,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       APPEND VALUE #(
         path    = ls_git-path
         kind    = lv_kind
-        generated = xsdbool( ls_git-path CP 'SECURITY/*' OR lv_kind = c_kind-bpf )
+        generated = xsdbool( ls_git-path CP 'SECURITY/*' OR lv_kind = c_kind-bpf OR lv_kind = c_kind-dimmember )
         model   = get_model( ls_git-path )
         team    = get_team( ls_git-path )
         docname = lv_docname
@@ -551,20 +565,26 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD selection_scope.
-    CLEAR: ev_kind, ev_model.
+    CLEAR: ev_kind, ev_model, ev_dimension.
     DATA lv_first TYPE abap_bool VALUE abap_true.
     DATA lv_mixed_kind TYPE abap_bool.
     DATA lv_mixed_model TYPE abap_bool.
+    DATA lv_mixed_dimension TYPE abap_bool.
     LOOP AT it_paths INTO DATA(lv_path).
       DATA(lv_kind) = get_kind( lv_path ).
       DATA(lv_model) = get_model( lv_path ).
+      DATA(lv_dimension) = zcl_bpc_git_members=>get_dimension( lv_path ).
       IF lv_first = abap_true.
         ev_kind = lv_kind.
         ev_model = lv_model.
+        ev_dimension = lv_dimension.
         lv_first = abap_false.
       ELSE.
         IF ev_kind <> lv_kind.
           lv_mixed_kind = abap_true.
+        ENDIF.
+        IF ev_dimension <> lv_dimension.
+          lv_mixed_dimension = abap_true.
         ENDIF.
         IF ev_model <> lv_model.
           lv_mixed_model = abap_true.
@@ -573,6 +593,9 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     ENDLOOP.
     IF lv_mixed_kind = abap_true.
       CLEAR ev_kind.
+    ENDIF.
+    IF lv_mixed_dimension = abap_true.
+      CLEAR ev_dimension.
     ENDIF.
     IF lv_mixed_model = abap_true.
       CLEAR ev_model.
@@ -593,7 +616,8 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   METHOD get_history.
     DATA(ls_config) = get_config( iv_environment ).
     DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote
-      iv_kind = get_kind( iv_path ) iv_model = get_model( iv_path ) ).
+      iv_kind = get_kind( iv_path ) iv_model = get_model( iv_path )
+      iv_dimension = zcl_bpc_git_members=>get_dimension( iv_path ) ).
     IF NOT line_exists( ls_overview-workbooks[ path = iv_path ] ).
       zcx_abapgit_exception=>raise( 'The selected item is no longer listed; reload the overview' ).
     ENDIF.
@@ -618,9 +642,9 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
 
     " Statuses as of now, from the same head the commit builds on
     DATA(ls_config) = get_config( iv_environment ).
-    selection_scope( EXPORTING it_paths = it_paths IMPORTING ev_kind = DATA(lv_scope_kind) ev_model = DATA(lv_scope_model) ).
+    selection_scope( EXPORTING it_paths = it_paths IMPORTING ev_kind = DATA(lv_scope_kind) ev_model = DATA(lv_scope_model) ev_dimension = DATA(lv_scope_dimension) ).
     DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote
-      iv_individual = abap_true iv_kind = lv_scope_kind iv_model = lv_scope_model ).
+      iv_individual = abap_true iv_kind = lv_scope_kind iv_model = lv_scope_model iv_dimension = lv_scope_dimension ).
     IF ls_overview-branch_found = abap_false.
       ev_error = |Branch { ls_config-branch } does not exist in the repository yet. | &&
                  |Create it on the Git host first, for example by adding a README file.|.
@@ -692,9 +716,9 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
 
     " Statuses as of now, from the head whose content is restored
     DATA(ls_config) = get_config( iv_environment ).
-    selection_scope( EXPORTING it_paths = it_paths IMPORTING ev_kind = DATA(lv_scope_kind) ev_model = DATA(lv_scope_model) ).
+    selection_scope( EXPORTING it_paths = it_paths IMPORTING ev_kind = DATA(lv_scope_kind) ev_model = DATA(lv_scope_model) ev_dimension = DATA(lv_scope_dimension) ).
     DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote
-      iv_individual = abap_true iv_kind = lv_scope_kind iv_model = lv_scope_model ).
+      iv_individual = abap_true iv_kind = lv_scope_kind iv_model = lv_scope_model iv_dimension = lv_scope_dimension ).
     IF ls_overview-branch_found = abap_false.
       ev_error = |Branch { ls_config-branch } does not exist in the repository.|.
       RETURN.
@@ -749,7 +773,8 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         ELSE.
           ls_snapshot_file-status = c_status-unchanged.
         ENDIF.
-        IF lv_snapshot_path CP 'SECURITY/*' OR get_kind( lv_snapshot_path ) = c_kind-bpf.
+        IF lv_snapshot_path CP 'SECURITY/*' OR get_kind( lv_snapshot_path ) = c_kind-bpf
+            OR get_kind( lv_snapshot_path ) = c_kind-dimmember.
           ls_snapshot_file-generated = abap_true.
         ENDIF.
         IF ls_snapshot_file-status <> c_status-unchanged.
@@ -873,6 +898,14 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DATA lv_locked TYPE uj_flg.
     DATA lv_content TYPE xstring.
 
+    IF is_file-kind = c_kind-dimmember.
+      DATA(lv_member_delete) = xsdbool( is_file-status = c_status-deleted_git ).
+      DATA(lv_member_xml) = COND xstring( WHEN lv_member_delete = abap_true THEN is_file-content
+        ELSE io_remote->get_content( is_file-git_sha1 ) ).
+      rv_message = zcl_bpc_git_members=>restore( iv_environment = iv_environment iv_path = is_file-path
+        iv_xml = lv_member_xml iv_delete = lv_member_delete ).
+      RETURN.
+    ENDIF.
     IF is_file-kind = c_kind-bpf.
       DATA(lv_bpf_delete) = xsdbool( is_file-status = c_status-deleted_git ).
       DATA(lv_bpf_xml) = COND xstring( WHEN lv_bpf_delete = abap_true THEN is_file-content
@@ -1048,6 +1081,25 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DATA lv_doctype TYPE ujf_doc-doctype.
 
     DATA(lt_models) = get_models( iv_environment ).
+    IF ( iv_dimension IS NOT INITIAL AND iv_kind <> c_kind-dimmember )
+        OR ( iv_kind = c_kind-dimmember AND iv_model IS NOT INITIAL ).
+      RAISE EXCEPTION TYPE cx_uj_static_check.
+    ENDIF.
+    IF iv_model IS INITIAL AND ( iv_kind IS INITIAL OR iv_kind = c_kind-dimmember ).
+      IF zcl_bpc_git_members=>can_read( ) = abap_true.
+        DATA(lt_members) = zcl_bpc_git_members=>list( iv_environment = iv_environment iv_dimension = iv_dimension ).
+        LOOP AT lt_members INTO DATA(ls_member).
+          INSERT VALUE #( path = ls_member-path kind = c_kind-dimmember
+            docname = to_docname( iv_environment = iv_environment iv_path = ls_member-path )
+            generated = abap_true content = ls_member-content size = xstrlen( ls_member-content ) ) INTO TABLE rt_workbooks.
+        ENDLOOP.
+      ELSEIF iv_kind = c_kind-dimmember.
+        RAISE EXCEPTION TYPE cx_uj_no_auth.
+      ENDIF.
+    ENDIF.
+    IF iv_kind = c_kind-dimmember.
+      RETURN.
+    ENDIF.
     DATA(lv_security_scope) = xsdbool( iv_kind = c_kind-team OR iv_kind = c_kind-taskprofile
       OR iv_kind = c_kind-dataprofile ).
     IF lv_security_scope = abap_true AND iv_model IS NOT INITIAL.
@@ -1276,6 +1328,10 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_kind.
+    rv_kind = zcl_bpc_git_members=>get_kind( iv_path ).
+    IF rv_kind IS NOT INITIAL.
+      RETURN.
+    ENDIF.
     rv_kind = zcl_bpc_git_bpf=>get_kind( iv_path ).
     IF rv_kind IS NOT INITIAL.
       RETURN.
@@ -1663,7 +1719,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_model.
-    IF iv_path CP 'SECURITY/*'.
+    IF iv_path CP 'SECURITY/*' OR get_kind( iv_path ) = c_kind-dimmember.
       RETURN.
     ENDIF.
     rv_model = COND #( WHEN get_kind( iv_path ) = c_kind-script

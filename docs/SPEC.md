@@ -5,7 +5,8 @@
 bpcGit is a web app on the BPC system that puts BPC content under Git version
 control in a GitHub repository. It tracks EPM workbooks, logic scripts,
 transformation and conversion files, Data Manager packages and package links,
-security definitions and business process flow (BPF) template designs.
+security definitions, business process flow (BPF) template designs and dimension
+member master data.
 
 A user opens the app, connects it to a GitHub repository, picks the BPC
 environment to track, and then commits workbooks to Git or restores them from Git.
@@ -24,7 +25,8 @@ environment to track, and then commits workbooks to Git or restores them from Gi
 
 ### Out of scope (v1)
 
-- Data Manager data files, dimensions, BPF instances and other BPC content
+- Data Manager transaction data files, dimension schema creation/deletion, BPF
+  instances and other BPC content
   not listed in section 3.
 - Private publications (`PRIVATEPUBLICATIONS\<user>\`) and temporary files.
 - Branch management, merging and conflict resolution inside the app. These
@@ -638,3 +640,91 @@ and BPC write acceptance require the user's abapGit pull and browser test:
    be committed back. Test new-template restore in another environment with the
    model/workspaces available, plus missing workspace, open editor and Git deletion
    failures. Failed restores must not record a synchronized baseline.
+
+## Dimension members (0.14.0)
+
+The user approved versioning member IDs, descriptions, property values and
+hierarchy parents, with add/update restore and no automatic member deletion.
+ZCL_BPC_GIT_MEMBERS uses the BPC member editor API CL_UJAM_MEMBER /
+IF_UJA_MEMBER_MANAGER. This tracks the current working copy, including saved
+unprocessed changes; restore saves to that working copy. It never calls Process,
+Refresh, Clear, Import, activation or transaction-data write APIs. The user
+validates/processes the dimension deliberately in BPC afterward.
+
+Kind DIMMEMBER appears as Dimension members. Dimensions belong to the environment
+and can be shared across models; paths therefore have no model component:
+DIMENSIONS/<escaped-dimension>/MEMBERS/<escaped-uppercase-member-id>.xml.
+Each member has independent status, selection, commit, history and sync baseline.
+Encoded path identities remain unchanged while member names are decoded for
+presentation/search. Generated XML never uses the UJF document restore route.
+
+Selecting Dimension members disables the Model selector and obtains lightweight
+supported dimension metadata through GET /dimensions?environment=<id>. The first
+accessible dimension is selected; no member scan/Git comparison starts until
+Load. All supported dimensions is an explicit alternative. POST /workbooks accepts
+optional dimension only with DIMMEMBER and rejects a model with that kind.
+Backend comparison and mutation/history scope include the chosen/common dimension.
+All objects/All models also includes supported members for administrators;
+All objects restricted to a model excludes environment-scoped members.
+
+Manage Dimensions (P0012) or Manage Members (P0133) is required for this provider,
+in addition to native per-dimension access checks. Context is set for the requested
+environment. Explicit member requests fail without authority; All objects omits
+them. Inaccessible dimensions are omitted from metadata. This version supports
+non-time-dependent, non-reference dimensions with BPC parent hierarchies; dimensions
+with time-dependent properties/hierarchies or reference dimensions are excluded.
+Supplementary BW hierarchies, multi-language/version transport and dimension schema
+creation/modification are outside this release.
+
+The schema-version-1 XML contains dimension, uppercase ID, original-case member
+name, description and SAP language, plus properties and parents keyed/sorted by
+logical property/hierarchy name. Empty values are included so restore can clear
+previous values. Generated properties, row flags, OBJVERS, physical BW names,
+SIDs, timestamps and processing state are omitted. Member descriptions use the
+SAP session language; restores require that same language. Native dynamic
+working-copy columns are mapped to logical XML names using dimension metadata,
+preserving long property values beyond the older fixed 255-character DTO limit.
+
+Restore validates XML schema, path, member ID/name/language, editable target
+properties and existing target hierarchies. The set of editable properties and
+parent hierarchies must match before saving; schemas are not created by restoring
+a member. Dynamic native fields are checked for lossless value conversion, so
+oversized or incompatible values fail instead of truncating silently. Native Save
+is called with computed insert/update flags and update mode, preserving other
+members and generated/local fields. Native validation and dimension locks remain
+enabled. Missing member/property/parent references are reported by BPC; when
+creating members in another environment, restore/create referenced parents and
+property-reference members first. Bulk restore remains per member, so individual
+results may succeed/fail independently.
+
+Save updates the editable member store, with no dimension processing. Readback
+requires the selected member's canonical XML to match before synchronization is
+recorded. A failed save/readback uses the existing restore rollback. No broader
+atomicity beyond the native database operation is claimed. Git deletion and
+historical deletion restore are disabled in the UI and refused in the backend;
+remove members deliberately in BPC where transaction-data references can be
+checked. A deliberate BPC deletion can still be committed to Git. Restoring older
+member content retains the current-head baseline so it can be committed again.
+
+Validation: provider ADT syntax check in an existing class context (name substitution
+only); complete service/HTTP checks through ADT using signature stand-ins for the
+new provider and new service arguments not yet installed in SAP. UI regressions
+exercise metadata-only selection, stale-environment responses, error handling,
+scoped refresh, explicit All dimensions, decoding, history payloads and deletion
+restrictions. JS/JSON/XML and abapGit formatting checks pass. No SAP writes were
+made through ADT. Activation and native write acceptance remain the user's steps:
+
+1. Pull/activate with abapGit. Choose Dimension members and a regular dimension;
+   confirm shared dimensions appear once and selecting one does not auto-load.
+2. Load, commit a few representative members (including description, blank
+   properties, formula/property references and multiple hierarchy parents), then
+   refresh and confirm Unchanged. Save an edit in BPC without processing and
+   confirm Modified in BPC appears for just that member.
+3. Restore it, open the BPC member editor, and verify the description/properties/
+   parents returned to Git while other local members stayed intact. Validate and
+   process the dimension manually; confirm status remains stable after processing.
+4. Restore an older history version and confirm it is a committable working-copy
+   change. Test adding a missing member with its references already available.
+5. Test schema/path/language mismatch, invalid references, locked dimension,
+   oversized property and deletion snapshots. Failures must not record success or
+   remove members. Transaction data must remain unchanged.

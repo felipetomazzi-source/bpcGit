@@ -44,6 +44,19 @@ restore deletion are refused. UI scope/name/history regressions and syntax check
 pass (provider in existing class context, service with provider signature stand-ins,
 HTTP directly). User must pull/activate via abapGit and test draft restore, instance
 preservation and cross-environment dependencies. No SAP writes were made via ADT.
+Version 0.14.0 adds per-member dimension master-data version control through
+ZCL_BPC_GIT_MEMBERS. Select Dimension members then a dimension (metadata only),
+and Load. Shared dimensions have environment-level DIMENSIONS/.../MEMBERS paths.
+P0012 or P0133 plus native dimension access is required. XML names logical
+properties/parents and excludes generated/runtime metadata. Native Save adds or
+updates the working copy, verifies readback and leaves processing to the user;
+other members and transaction data are preserved. Deletion restore is refused;
+properties/hierarchies must already match the target schema, and referenced
+members should exist first. Time-dependent and reference dimensions are excluded.
+ADT syntax (provider context/name substitution, integration signature stand-ins),
+UI scope/history regressions and format/JS/JSON/XML checks pass. User acceptance
+must cover saved unprocessed edits, restore/readback, process stability, parents,
+references and preservation of unrelated members/data after abapGit activation.
 The sections below preserve the earlier session handover; use SPEC.md and
 AGENTS.md for current behavior and the authorized commit/push workflow.
 

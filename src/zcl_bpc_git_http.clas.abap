@@ -14,6 +14,7 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
         config       TYPE string VALUE '/config',
         connection   TYPE string VALUE '/connection',
         models       TYPE string VALUE '/models',
+        dimensions   TYPE string VALUE '/dimensions',
         workbooks    TYPE string VALUE '/workbooks',
         commit       TYPE string VALUE '/commit',
         restore      TYPE string VALUE '/restore',
@@ -60,6 +61,7 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING io_service TYPE REF TO zcl_bpc_git_service
       RAISING cx_uj_static_check.
     "! Workbooks of the environment in BPC and Git, with their status.
+    METHODS handle_dimensions IMPORTING io_service TYPE REF TO zcl_bpc_git_service RAISING cx_uj_static_check.
     METHODS handle_models
       IMPORTING io_service TYPE REF TO zcl_bpc_git_service
       RAISING cx_uj_static_check.
@@ -148,6 +150,10 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
           WHEN c_resource-connection.
             IF require_method( c_method-post ).
               handle_test_connection( lo_service ).
+            ENDIF.
+          WHEN c_resource-dimensions.
+            IF require_method( c_method-get ).
+              handle_dimensions( lo_service ).
             ENDIF.
           WHEN c_resource-models.
             IF require_method( c_method-get ).
@@ -281,6 +287,21 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       `,"pushMessage":` && quote( ls_result-push_message ) && `}` ).
   ENDMETHOD.
 
+  METHOD handle_dimensions.
+    DATA(lv_environment) = read_field( iv_name = 'environment' iv_label = 'Environment' iv_max_length = 20 ).
+    IF mv_invalid = abap_true.
+      RETURN.
+    ENDIF.
+    DATA(lt_dimensions) = io_service->available_dimensions( CONV #( lv_environment ) ).
+    DATA lv_json TYPE string.
+    DATA lv_separator TYPE string.
+    LOOP AT lt_dimensions INTO DATA(lv_dimension).
+      lv_json = lv_json && lv_separator && quote( lv_dimension ).
+      lv_separator = ','.
+    ENDLOOP.
+    respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"dimensions":[` && lv_json && `]}` ).
+  ENDMETHOD.
+
   METHOD handle_models.
     DATA(lv_environment) = read_field( iv_name = 'environment' iv_label = 'Environment' iv_max_length = 20 ).
     IF mv_invalid = abap_true.
@@ -299,14 +320,21 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
   METHOD handle_workbooks.
     DATA(lv_kind) = read_field( iv_name = 'kind' iv_label = 'Object type' iv_max_length = 20 iv_required = abap_false ).
     DATA(lv_model) = read_field( iv_name = 'model' iv_label = 'Model' iv_max_length = 20 iv_required = abap_false ).
+    DATA(lv_dimension) = read_field( iv_name = 'dimension' iv_label = 'Dimension' iv_max_length = 20 iv_required = abap_false ).
     IF mv_invalid = abap_true.
       RETURN.
     ENDIF.
     IF lv_kind IS NOT INITIAL AND lv_kind <> 'WORKBOOK' AND lv_kind <> 'SCRIPT'
-        AND lv_kind <> 'BPF' AND lv_kind <> 'TEAM' AND lv_kind <> 'TASKPROFILE' AND lv_kind <> 'DATAPROFILE'
+        AND lv_kind <> 'DIMMEMBER' AND lv_kind <> 'BPF' AND lv_kind <> 'TEAM' AND lv_kind <> 'TASKPROFILE' AND lv_kind <> 'DATAPROFILE'
         AND lv_kind <> 'REPORT' AND lv_kind <> 'SCHEDULE' AND lv_kind <> 'OTHER'
         AND lv_kind <> 'TRANSFORMATION' AND lv_kind <> 'CONVERSION' AND lv_kind <> 'PACKAGE' AND lv_kind <> 'LINK'.
       respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'Choose a supported object type' ).
+      RETURN.
+    ENDIF.
+    IF ( lv_dimension IS NOT INITIAL AND lv_kind <> 'DIMMEMBER' )
+        OR ( lv_kind = 'DIMMEMBER' AND lv_model IS NOT INITIAL ).
+      respond_error( iv_code = 400 iv_reason = 'Bad Request'
+        iv_message = 'Dimension members apply to the environment; select a dimension and leave model empty' ).
       RETURN.
     ENDIF.
     IF ( lv_kind = 'TEAM' OR lv_kind = 'TASKPROFILE' OR lv_kind = 'DATAPROFILE' ) AND lv_model IS NOT INITIAL.
@@ -325,7 +353,7 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
           RETURN.
         ENDIF.
         DATA(ls_overview) = io_service->get_overview( iv_environment = lv_environment
-                                                      io_remote = lo_remote iv_kind = lv_kind iv_model = lv_model ).
+                                                      io_remote = lo_remote iv_kind = lv_kind iv_model = lv_model iv_dimension = lv_dimension ).
       CATCH zcx_abapgit_exception INTO DATA(lx_git).
         respond_git_error( ix_error = lx_git iv_with_login = lv_with_login ).
         RETURN.
