@@ -18,6 +18,13 @@ head comparison baseline so restored older content can be committed. Local UI
 regressions pass; remote class syntax and service/handler syntax with stand-ins
 for new cross-class APIs were checked through ADT. Full activation and SAP
 acceptance remain the user's abapGit/browser steps.
+Version 0.11.0 adds explicit type/model Load at startup, backend scoped listing,
+head-validated Git metadata reuse and stage timings. Scoped loading and history
+UI regression tests pass. ADT checked the complete remote source; service/HTTP
+checks use stand-ins only for cross-class APIs not yet installed in SAP.
+User confirmed the prior restore/history workflow works. This release still
+needs abapGit pull/activation and browser acceptance, including scoped pairs,
+Git-only files, model switching, and first-load versus refresh timing.
 The sections below preserve the earlier session handover; use SPEC.md and
 AGENTS.md for current behavior and the authorized commit/push workflow.
 

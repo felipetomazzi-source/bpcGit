@@ -47,6 +47,9 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         branch_found TYPE abap_bool,
         commit       TYPE string,
         workbooks    TYPE ty_workbooks,
+        bpc_ms       TYPE i,
+        git_ms       TYPE i,
+        compare_ms   TYPE i,
       END OF ty_overview.
     CONSTANTS:
       BEGIN OF c_kind,
@@ -71,6 +74,11 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         differs      TYPE string VALUE 'DIFFERS',
       END OF c_status.
 
+    TYPES ty_models TYPE STANDARD TABLE OF uj_appl_id WITH DEFAULT KEY.
+    METHODS available_models
+      IMPORTING iv_environment TYPE uj_appset_id
+      RETURNING VALUE(rt_models) TYPE ty_models
+      RAISING cx_uj_no_auth cx_uj_static_check.
     "! Environments the current user may access.
     METHODS get_environments
       RETURNING VALUE(rt_environments) TYPE ty_environments
@@ -93,6 +101,8 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_environment TYPE uj_appset_id
                 io_remote TYPE REF TO zcl_bpc_git_remote
                 iv_individual TYPE abap_bool DEFAULT abap_false
+                iv_kind TYPE string OPTIONAL
+                iv_model TYPE string OPTIONAL
       RETURNING VALUE(rs_overview) TYPE ty_overview
       RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
     METHODS get_history
@@ -161,7 +171,6 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
       END OF ty_bpc_workbook,
       ty_bpc_workbooks TYPE SORTED TABLE OF ty_bpc_workbook WITH UNIQUE KEY path.
     TYPES ty_states TYPE SORTED TABLE OF zbpc_git_state WITH UNIQUE KEY docname.
-    TYPES ty_models TYPE STANDARD TABLE OF uj_appl_id WITH DEFAULT KEY.
 
     CONSTANTS c_default_branch TYPE string VALUE 'main' ##NO_TEXT.
     CONSTANTS c_branch_prefix TYPE string VALUE 'refs/heads/' ##NO_TEXT.
@@ -233,6 +242,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     "! below <model>\DATAMANAGER\ and <model>\TEAM FILES\<team>\DATAMANAGER\.
     METHODS list_workbooks
       IMPORTING iv_environment TYPE uj_appset_id
+                iv_kind TYPE string OPTIONAL iv_model TYPE string OPTIONAL
       RETURNING VALUE(rt_workbooks) TYPE ty_bpc_workbooks
       RAISING cx_uj_static_check.
     "! Kind (c_kind) of a repository path, initial if bpcGit does not track it:
@@ -241,6 +251,9 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     "!   <model>/DATAMANAGER/TRANSFORMATIONFILES/.../<name>.TDM|XLS  transformation
     "!   <model>/DATAMANAGER/CONVERSIONFILES/.../<name>.CDM|XLS      conversion
     "! and the same below <model>/TEAM FILES/<team>/ instead of <model>/.
+    METHODS selection_scope
+      IMPORTING it_paths TYPE string_table
+      EXPORTING ev_kind TYPE string ev_model TYPE string.
     METHODS history_paths
       IMPORTING iv_path TYPE string
       RETURNING VALUE(rt_paths) TYPE string_table.
@@ -363,6 +376,11 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DELETE ADJACENT DUPLICATES FROM rt_environments.
   ENDMETHOD.
 
+  METHOD available_models.
+    check_environment( iv_environment ).
+    rt_models = get_models( iv_environment ).
+  ENDMETHOD.
+
   METHOD get_config.
     check_environment( iv_environment ).
     SELECT SINGLE * FROM zbpc_git_repo
@@ -416,8 +434,18 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DATA lv_synced TYPE abap_bool.
 
     DATA(ls_config) = get_config( iv_environment ).
-    DATA(lt_bpc) = list_workbooks( iv_environment ).
-    DATA(ls_branch) = io_remote->read_branch( ls_config-branch ).
+    DATA lv_start TYPE i.
+    DATA lv_end TYPE i.
+    GET RUN TIME FIELD lv_start.
+    DATA(lt_bpc) = list_workbooks( iv_environment = iv_environment iv_kind = iv_kind iv_model = iv_model ).
+    GET RUN TIME FIELD lv_end.
+    rs_overview-bpc_ms = ( lv_end - lv_start ) / 1000.
+    GET RUN TIME FIELD lv_start.
+    DATA(ls_branch) = io_remote->read_branch( iv_branch = ls_config-branch
+      iv_metadata_only = xsdbool( iv_individual = abap_false ) ).
+    GET RUN TIME FIELD lv_end.
+    rs_overview-git_ms = ( lv_end - lv_start ) / 1000.
+    GET RUN TIME FIELD lv_start.
     rs_overview-branch_found = ls_branch-branch_found.
     rs_overview-commit = ls_branch-commit.
     SELECT * FROM zbpc_git_state
@@ -460,7 +488,9 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     " Files only in Git; untracked ones (README.md) are not ours
     LOOP AT ls_branch-files INTO ls_git.
       DATA(lv_kind) = get_kind( ls_git-path ).
-      IF lv_kind IS INITIAL OR line_exists( lt_bpc[ path = ls_git-path ] ).
+      IF lv_kind IS INITIAL OR ( iv_kind IS NOT INITIAL AND lv_kind <> iv_kind )
+          OR ( iv_model IS NOT INITIAL AND get_model( ls_git-path ) <> iv_model )
+          OR line_exists( lt_bpc[ path = ls_git-path ] ).
         CONTINUE.
       ENDIF.
       DATA(lv_docname) = to_docname( iv_environment = iv_environment iv_path = ls_git-path ).
@@ -479,6 +509,37 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     IF iv_individual = abap_false.
       rs_overview-workbooks = group_files( rs_overview-workbooks ).
     ENDIF.
+    GET RUN TIME FIELD lv_end.
+    rs_overview-compare_ms = ( lv_end - lv_start ) / 1000.
+  ENDMETHOD.
+
+  METHOD selection_scope.
+    CLEAR: ev_kind, ev_model.
+    DATA lv_first TYPE abap_bool VALUE abap_true.
+    DATA lv_mixed_kind TYPE abap_bool.
+    DATA lv_mixed_model TYPE abap_bool.
+    LOOP AT it_paths INTO DATA(lv_path).
+      DATA(lv_kind) = get_kind( lv_path ).
+      DATA(lv_model) = get_model( lv_path ).
+      IF lv_first = abap_true.
+        ev_kind = lv_kind.
+        ev_model = lv_model.
+        lv_first = abap_false.
+      ELSE.
+        IF ev_kind <> lv_kind.
+          lv_mixed_kind = abap_true.
+        ENDIF.
+        IF ev_model <> lv_model.
+          lv_mixed_model = abap_true.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+    IF lv_mixed_kind = abap_true.
+      CLEAR ev_kind.
+    ENDIF.
+    IF lv_mixed_model = abap_true.
+      CLEAR ev_model.
+    ENDIF.
   ENDMETHOD.
 
   METHOD history_paths.
@@ -494,7 +555,8 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
 
   METHOD get_history.
     DATA(ls_config) = get_config( iv_environment ).
-    DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote ).
+    DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote
+      iv_kind = get_kind( iv_path ) iv_model = get_model( iv_path ) ).
     IF NOT line_exists( ls_overview-workbooks[ path = iv_path ] ).
       zcx_abapgit_exception=>raise( 'The selected item is no longer listed; reload the overview' ).
     ENDIF.
@@ -519,8 +581,9 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
 
     " Statuses as of now, from the same head the commit builds on
     DATA(ls_config) = get_config( iv_environment ).
+    selection_scope( EXPORTING it_paths = it_paths IMPORTING ev_kind = DATA(lv_scope_kind) ev_model = DATA(lv_scope_model) ).
     DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote
-                                      iv_individual = abap_true ).
+      iv_individual = abap_true iv_kind = lv_scope_kind iv_model = lv_scope_model ).
     IF ls_overview-branch_found = abap_false.
       ev_error = |Branch { ls_config-branch } does not exist in the repository yet. | &&
                  |Create it on the Git host first, for example by adding a README file.|.
@@ -592,8 +655,9 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
 
     " Statuses as of now, from the head whose content is restored
     DATA(ls_config) = get_config( iv_environment ).
+    selection_scope( EXPORTING it_paths = it_paths IMPORTING ev_kind = DATA(lv_scope_kind) ev_model = DATA(lv_scope_model) ).
     DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote
-                                      iv_individual = abap_true ).
+      iv_individual = abap_true iv_kind = lv_scope_kind iv_model = lv_scope_model ).
     IF ls_overview-branch_found = abap_false.
       ev_error = |Branch { ls_config-branch } does not exist in the repository.|.
       RETURN.
@@ -928,20 +992,43 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DATA lv_doctype TYPE ujf_doc-doctype.
 
     DATA(lt_models) = get_models( iv_environment ).
+    IF iv_model IS NOT INITIAL.
+      IF NOT line_exists( lt_models[ table_line = iv_model ] ).
+        RAISE EXCEPTION TYPE cx_uj_no_auth.
+      ENDIF.
+      DELETE lt_models WHERE table_line <> iv_model.
+    ENDIF.
     DATA(lo_files) = get_file_service( iv_environment ).
     LOOP AT lt_models INTO DATA(lv_model).
       " Folders to list; get_kind decides what in them is tracked. Team folders
       " are listed as a whole, as their libraries sit one level down.
       DATA(lv_model_folder) = |{ lv_model }\\|.
-      DATA(lt_folders) = VALUE ty_folders(
-        ( folder = lv_model_folder && c_webexcel_folder && `\` types = c_workbook_types subfolders = abap_true )
-        ( folder = lv_model_folder && c_team_folder && `\`
-          types = |{ c_workbook_types } { c_transformation_types } { c_conversion_types }| subfolders = abap_true )
-        ( folder = lv_model_folder && c_dm_folder && `\` && c_transformation_folder && `\`
-          types = c_transformation_types subfolders = abap_true )
-        ( folder = lv_model_folder && c_dm_folder && `\` && c_conversion_folder && `\`
-          types = c_conversion_types subfolders = abap_true )
-        ( folder = |{ c_script_folder }\\{ lv_model }\\| types = c_script_type subfolders = abap_false ) ).
+      DATA lt_folders TYPE ty_folders.
+      CLEAR lt_folders.
+      IF iv_kind IS INITIAL OR iv_kind = c_kind-workbook.
+        APPEND VALUE #( folder = lv_model_folder && c_webexcel_folder && `\`
+          types = c_workbook_types subfolders = abap_true ) TO lt_folders.
+      ENDIF.
+      DATA(lv_team_types) = COND string( WHEN iv_kind = c_kind-workbook THEN c_workbook_types
+        WHEN iv_kind = c_kind-transformation THEN c_transformation_types
+        WHEN iv_kind = c_kind-conversion THEN c_conversion_types
+        WHEN iv_kind IS INITIAL THEN |{ c_workbook_types } { c_transformation_types } { c_conversion_types }| ).
+      IF lv_team_types IS NOT INITIAL.
+        APPEND VALUE #( folder = lv_model_folder && c_team_folder && `\`
+          types = lv_team_types subfolders = abap_true ) TO lt_folders.
+      ENDIF.
+      IF iv_kind IS INITIAL OR iv_kind = c_kind-transformation.
+        APPEND VALUE #( folder = lv_model_folder && c_dm_folder && `\` && c_transformation_folder && `\`
+          types = c_transformation_types subfolders = abap_true ) TO lt_folders.
+      ENDIF.
+      IF iv_kind IS INITIAL OR iv_kind = c_kind-conversion.
+        APPEND VALUE #( folder = lv_model_folder && c_dm_folder && `\` && c_conversion_folder && `\`
+          types = c_conversion_types subfolders = abap_true ) TO lt_folders.
+      ENDIF.
+      IF iv_kind IS INITIAL OR iv_kind = c_kind-script.
+        APPEND VALUE #( folder = |{ c_script_folder }\\{ lv_model }\\|
+          types = c_script_type subfolders = abap_false ) TO lt_folders.
+      ENDIF.
 
       LOOP AT lt_folders INTO DATA(ls_folder).
         lv_directory = |\\ROOT\\WEBFOLDERS\\{ iv_environment }\\{ ls_folder-folder }|.
@@ -964,7 +1051,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
           LOOP AT lt_documents INTO DATA(ls_document).
             DATA(lv_path) = to_path( iv_environment = iv_environment iv_docname = ls_document-docname ).
             DATA(lv_kind) = get_kind( lv_path ).
-            IF lv_kind IS INITIAL.
+            IF lv_kind IS INITIAL OR ( iv_kind IS NOT INITIAL AND lv_kind <> iv_kind ).
               CONTINUE.
             ENDIF.
             INSERT VALUE #( path        = lv_path
@@ -979,10 +1066,14 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         ENDLOOP.
       ENDLOOP.
 
-      list_packages( EXPORTING iv_environment = iv_environment iv_model = lv_model
-                     CHANGING ct_workbooks = rt_workbooks ).
-      list_links( EXPORTING iv_environment = iv_environment iv_model = lv_model
-                  CHANGING ct_workbooks = rt_workbooks ).
+      IF iv_kind IS INITIAL OR iv_kind = c_kind-package.
+        list_packages( EXPORTING iv_environment = iv_environment iv_model = lv_model
+                       CHANGING ct_workbooks = rt_workbooks ).
+      ENDIF.
+      IF iv_kind IS INITIAL OR iv_kind = c_kind-link.
+        list_links( EXPORTING iv_environment = iv_environment iv_model = lv_model
+                    CHANGING ct_workbooks = rt_workbooks ).
+      ENDIF.
     ENDLOOP.
   ENDMETHOD.
 

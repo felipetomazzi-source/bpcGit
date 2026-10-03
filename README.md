@@ -23,10 +23,11 @@ Base path: `/sap/bc/zbpc_git` (handler `ZCL_BPC_GIT_HTTP`)
 | --- | --- | --- |
 | GET | `/ping` | Caller, system, client and the installed abapGit version |
 | GET | `/environments` | BPC environments the user may access |
+| GET | `/models?environment=<id>` | Authorized models; no Git pull or file comparison |
 | GET | `/config?environment=<id>` | Repository setup of an environment |
 | POST | `/config` | Save it (`environment`, `url`, `branch`) |
 | POST | `/connection` | Test the connection (`environment`; optional `user`, `token`) |
-| POST | `/workbooks` | Tracked files in BPC and Git with their status (`environment`; optional `user`, `token`) |
+| POST | `/workbooks` | Tracked files in BPC and Git with their status (`environment`; optional `kind`, `model`, `user`, `token`); returns stage timings |
 | POST | `/commit` | Commit selected files (`environment`, `message`, `commit` = head seen, `paths` one per line; `user`, `token`) |
 | POST | `/restore` | Write a Git version into BPC (`environment`, `commit` = head seen, `paths`; optional `version`, `depth`, `user`, `token`) |
 | POST | `/history` | Changes to one item (`environment`, `path`; optional `depth`, `user`, `token`) |
@@ -54,7 +55,7 @@ a form on another website cannot change data with the user's session.
 
 ## Data Manager content
 
-Packages and links appear in their own Type filters. Packages are XML files
+Packages and links have their own object type choices before loading. Packages are XML files
 under `DATAMANAGER/PACKAGES/<group>/`; links are under `DATAMANAGER/PACKAGELINKS/`.
 Team packages use the team path. Package scripts have one XML line per step;
 link IDs are removed in Git and restored using the target system's ID.
@@ -75,3 +76,24 @@ Select one item and choose History to inspect its earlier versions. Load older
 history extends the recent branch range to at most 1,000 commits. Restoring an
 older version changes BPC and leaves it ready to commit; it does not move Git.
 Local UI regression checks: `node tests/history_ui.test.cjs`.
+
+## Scoped loading (0.11.0)
+
+Opening an environment reads setup and authorized model names only. Choose one
+object type and optionally a model, then press **Load**. SAP lists and compares
+that scope, including Git-only files. Changing the choices clears the previous
+list and selection; refresh and refresh after commit/restore retain the loaded
+scope. Workbook subtype, status, location and search filters apply to loaded rows.
+
+The first Git read pulls the branch snapshot. Subsequent reads may reuse its
+path/hash metadata from SAP's shared buffer after checking current Git access
+and the advertised branch head. Cache entries are isolated by SAP client/user,
+Git username, repository and branch; no tokens or file content are cached.
+Eviction or a moved branch triggers a fresh pull. Commit and restore always pull
+fresh content. Git still needs repository-wide metadata; the BPC scan is scoped.
+
+The overview shows elapsed seconds. Its tooltip reports SAP listing, Git and
+comparison milliseconds (also available as `timings` in `/workbooks`). Use these
+to compare one model with all models and first load with refresh before deciding
+whether parallel SAP processing is worthwhile. Shared buffer reuse is local to
+an application server and is a best-effort optimization.

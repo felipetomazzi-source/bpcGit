@@ -465,3 +465,30 @@ the Git host wants it.
 - **Q8. How does bpcGit hook into abapGit's user exit? Resolved (2026-10-03):**
   it doesn't. Without SM59 (Q1) no exit is needed, so a customer's own
   `ZCL_ABAPGIT_USER_EXIT` is never touched.
+
+## Scoped startup and overview performance (0.11.0)
+
+Startup does not enumerate BPC documents or pull Git. It reads repository setup
+and `/models` metadata, then offers WORKBOOK, SCRIPT, TRANSFORMATION, CONVERSION,
+PACKAGE or LINK and an optional authorized model. Load sends `kind` and `model`
+to `/workbooks`; omitted fields retain the legacy API all-content behavior.
+Model authorization is checked before listing. Only the selected folder types
+and generated object providers run; Git-only rows are filtered by the same scope.
+Pairs stay grouped. Commit/restore status checks and History derive scope from
+selected paths; mixed selections fall back to the relevant broader scope.
+
+Changing the choices invalidates pending overview responses and clears selection.
+Refresh and action completion reload the loaded scope. Config/environment changes
+clear the overview, and stale configuration responses cannot initiate a scan.
+
+The remote adapter caches only branch path/hash metadata in the existing INDX
+shared buffer area BG, keyed by hashed SAP client/user, Git user, URL and branch.
+Every read checks Git authorization and current head before using cached metadata.
+A miss, eviction or head change causes a fresh pull. Binaries, tokens and Git
+objects are never placed in the cache. Mutations bypass cache input and fetch full
+content; existing optimistic head checks and paired restore transactions remain.
+Reuse is best effort on one application server. No new DDIC objects are required.
+
+`timings` reports `bpcMs`, `gitMs`, `compareMs`; the page shows total client elapsed
+seconds with the server stages in a tooltip. This first step reduces work and
+measures it. Parallel processing remains deferred until SAP measurements justify it.

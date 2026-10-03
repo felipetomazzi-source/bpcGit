@@ -13,6 +13,7 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
         environments TYPE string VALUE '/environments',
         config       TYPE string VALUE '/config',
         connection   TYPE string VALUE '/connection',
+        models       TYPE string VALUE '/models',
         workbooks    TYPE string VALUE '/workbooks',
         commit       TYPE string VALUE '/commit',
         restore      TYPE string VALUE '/restore',
@@ -59,6 +60,9 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING io_service TYPE REF TO zcl_bpc_git_service
       RAISING cx_uj_static_check.
     "! Workbooks of the environment in BPC and Git, with their status.
+    METHODS handle_models
+      IMPORTING io_service TYPE REF TO zcl_bpc_git_service
+      RAISING cx_uj_static_check.
     METHODS handle_workbooks
       IMPORTING io_service TYPE REF TO zcl_bpc_git_service
       RAISING cx_uj_static_check.
@@ -144,6 +148,10 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
           WHEN c_resource-connection.
             IF require_method( c_method-post ).
               handle_test_connection( lo_service ).
+            ENDIF.
+          WHEN c_resource-models.
+            IF require_method( c_method-get ).
+              handle_models( lo_service ).
             ENDIF.
           WHEN c_resource-workbooks.
             IF require_method( c_method-post ).
@@ -273,7 +281,32 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       `,"pushMessage":` && quote( ls_result-push_message ) && `}` ).
   ENDMETHOD.
 
+  METHOD handle_models.
+    DATA(lv_environment) = read_field( iv_name = 'environment' iv_label = 'Environment' iv_max_length = 20 ).
+    IF mv_invalid = abap_true.
+      RETURN.
+    ENDIF.
+    DATA(lt_models) = io_service->available_models( CONV #( lv_environment ) ).
+    DATA lv_json TYPE string.
+    DATA lv_separator TYPE string.
+    LOOP AT lt_models INTO DATA(lv_model).
+      lv_json = lv_json && lv_separator && quote( lv_model ).
+      lv_separator = ','.
+    ENDLOOP.
+    respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"models":[` && lv_json && `]}` ).
+  ENDMETHOD.
+
   METHOD handle_workbooks.
+    DATA(lv_kind) = read_field( iv_name = 'kind' iv_label = 'Object type' iv_max_length = 20 iv_required = abap_false ).
+    DATA(lv_model) = read_field( iv_name = 'model' iv_label = 'Model' iv_max_length = 20 iv_required = abap_false ).
+    IF mv_invalid = abap_true.
+      RETURN.
+    ENDIF.
+    IF lv_kind IS NOT INITIAL AND lv_kind <> 'WORKBOOK' AND lv_kind <> 'SCRIPT'
+        AND lv_kind <> 'TRANSFORMATION' AND lv_kind <> 'CONVERSION' AND lv_kind <> 'PACKAGE' AND lv_kind <> 'LINK'.
+      respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'Choose a supported object type' ).
+      RETURN.
+    ENDIF.
     DATA lv_environment TYPE uj_appset_id.
     DATA ls_config TYPE zbpc_git_repo.
     DATA lo_remote TYPE REF TO zcl_bpc_git_remote.
@@ -286,7 +319,7 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
           RETURN.
         ENDIF.
         DATA(ls_overview) = io_service->get_overview( iv_environment = lv_environment
-                                                      io_remote = lo_remote ).
+                                                      io_remote = lo_remote iv_kind = lv_kind iv_model = lv_model ).
       CATCH zcx_abapgit_exception INTO DATA(lx_git).
         respond_git_error( ix_error = lx_git iv_with_login = lv_with_login ).
         RETURN.
@@ -311,6 +344,8 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       `{"branch":` && quote( ls_config-branch ) &&
       `,"branchFound":` && COND string( WHEN ls_overview-branch_found = abap_true THEN `true` ELSE `false` ) &&
       `,"commit":` && quote( ls_overview-commit ) &&
+      `,"timings":{"bpcMs":` && |{ ls_overview-bpc_ms }| &&
+      `,"gitMs":` && |{ ls_overview-git_ms }| && `,"compareMs":` && |{ ls_overview-compare_ms }| && `}` &&
       `,"workbooks":[` && lv_json && `]}` ).
   ENDMETHOD.
 

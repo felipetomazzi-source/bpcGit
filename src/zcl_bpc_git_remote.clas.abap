@@ -98,7 +98,7 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
     "! Paths and blob hashes of all files at the head of a branch. Keeps the
     "! Git objects, so that commit can build on this head.
     METHODS read_branch
-      IMPORTING iv_branch TYPE csequence
+      IMPORTING iv_branch TYPE csequence iv_metadata_only TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rs_content) TYPE ty_branch_content
       RAISING zcx_abapgit_exception.
     "! Content of a file at the head that read_branch returned.
@@ -119,6 +119,7 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PRIVATE SECTION.
     CONSTANTS c_heads TYPE string VALUE 'refs/heads/' ##NO_TEXT.
     DATA mv_url TYPE string.
+    DATA mv_cache_user TYPE string.
     DATA mv_has_credentials TYPE abap_bool.
     "! Head read by read_branch: branch ref, commit, files and Git objects
     DATA mv_branch_ref TYPE string.
@@ -173,6 +174,7 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
 
   METHOD constructor.
     mv_url = iv_url.
+    mv_cache_user = iv_user.
     zcl_abapgit_login_manager=>clear( ).
     IF iv_user IS NOT INITIAL AND iv_token IS NOT INITIAL.
       zcl_abapgit_login_manager=>set_basic( iv_uri = mv_url
@@ -212,6 +214,24 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       RETURN.
     ENDIF.
     rs_content-branch_found = abap_true.
+    " Cache only path/hash metadata. Verify current read access and head above
+    " on every request; commits and restores always pull the full fresh tree.
+    DATA lv_cache_key TYPE c LENGTH 40.
+    lv_cache_key = blob_sha1( cl_abap_codepage=>convert_to(
+      |{ sy-mandt }/{ sy-uname }/{ mv_cache_user }/{ mv_url }/{ lv_ref }| ) ).
+    IF iv_metadata_only = abap_true.
+      DATA ls_cached TYPE ty_branch_content.
+      TRY.
+          IMPORT metadata = ls_cached FROM SHARED BUFFER indx(bg) ID lv_cache_key.
+          IF sy-subrc = 0 AND ls_cached-branch_found = abap_true
+              AND ls_cached-commit = to_lower( lt_branches[ KEY name_key name = lv_ref ]-sha1 ).
+            rs_content = ls_cached.
+            RETURN.
+          ENDIF.
+        CATCH cx_sy_import_mismatch_error.
+          CLEAR ls_cached.
+      ENDTRY.
+    ENDIF.
 
     DATA(ls_pull) = zcl_abapgit_git_porcelain=>pull_by_branch( iv_url = mv_url iv_branch_name = lv_ref ).
     rs_content-commit = to_lower( ls_pull-commit ).
@@ -229,6 +249,8 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     mt_files = rs_content-files.
     mt_objects = ls_pull-objects.
     mt_pulled = ls_pull-files.
+    " Shared buffer may evict entries at any time; a miss simply pulls again.
+    EXPORT metadata = rs_content TO SHARED BUFFER indx(bg) ID lv_cache_key.
   ENDMETHOD.
 
   METHOD tree_signature.
