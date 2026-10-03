@@ -12,7 +12,8 @@ environment to track, and then commits workbooks to Git or restores them from Gi
 
 ### In scope (v1)
 
-- Set up a GitHub repository connection: URL, branch, username and token.
+- Set up a GitHub repository connection: URL and branch. The Git login is
+  asked only when the Git host needs it, as in abapGit (section 7.2).
 - Bind that connection to one BPC environment (AppSet).
 - List the environment's EPM workbooks and show each one's Git status.
 - Commit selected workbooks to GitHub with a commit message.
@@ -61,13 +62,12 @@ together with many `BACKUP\` folders and `COPY OF ...` files. See open question 
 2. The user enters:
    - Repository URL (`https://github.com/<owner>/<repo>`)
    - Branch (default `main`)
-   - GitHub username
-   - GitHub personal access token (labelled as "password/token"). GitHub stopped
-     accepting account passwords for Git and its API in 2021, so this must be a
-     token.
-3. **Test connection** calls `ZCL_ABAPGIT_GIT_TRANSPORT=>BRANCHES`. This checks
-   the SSL setup and the credentials, then confirms that the branch exists.
-4. **Save** stores the configuration.
+3. **Save** stores the configuration. No credentials are stored.
+4. **Test connection** calls `ZCL_ABAPGIT_GIT_TRANSPORT=>BRANCHES`. This checks
+   the SSL setup and read access, and shows whether the branch exists. With a
+   Git login (section 7.2) it also checks push access by asking for the
+   `git-receive-pack` advertisement, which the host only sends to users who may
+   push.
 
 ### F2. Select the environment
 
@@ -161,8 +161,7 @@ The app follows the same architecture as bpcIO:
 | Service | `ZCL_BPC_GIT_SERVICE` | Orchestrates flows F1–F6 |
 | BPC file access | `ZCL_BPC_GIT_BPC_FILES` | Wraps `CL_UJF_FILE_SERVICE_MGR` (`FACTORY`, `LIST_DIRECTORY`, `GET_DOCUMENT`, `PUT_DOCUMENT`, `LOCK_DOCUMENT`/`UNLOCK_DOCUMENT`) |
 | Git client | `ZCL_BPC_GIT_REMOTE` | Thin wrapper over abapGit (section 7.1). It is the only class that calls abapGit |
-| Credential exit | `ZCL_BPC_GIT_ABAPGIT_EXIT` | Implements `ZIF_ABAPGIT_EXIT`. It is put in place at runtime and only for bpcGit's own requests (section 7.2). bpcGit does **not** ship `ZCL_ABAPGIT_USER_EXIT` |
-| Config table | `ZBPC_GIT_REPO` | URL, branch, SM59 destination, environment, models, author |
+| Config table | `ZBPC_GIT_REPO` | Environment, URL, branch, last changed by/at |
 | Sync state table | `ZBPC_GIT_STATE` | One row per tracked file (section 6) |
 | Package | `ZBPC_GIT` | Already linked to this repository in abapGit (key 000000000006) |
 
@@ -191,56 +190,40 @@ Rules:
 - abapGit doesn't promise a stable API ("future changes are a possibility",
   docs.abapgit.org, API page). For that reason only `ZCL_BPC_GIT_REMOTE` calls
   abapGit, and upgrading abapGit means re-testing that one class.
-- **Login without a popup:** when a request gets a 401 and no SAP GUI is
-  available, `ZCL_ABAPGIT_HTTP->ACQUIRE_LOGIN_DETAILS` falls back to a password
-  popup. That popup must never be reached from the web app, so credentials are
-  always supplied before abapGit is called. They come either from the SM59
-  destination (through the user exit) or from `LOGIN_MANAGER=>SET_BASIC` for a
-  token entered in the session. A 401 is turned into a clean error for the UI.
+- **No popup:** when the Git host answers 401 and no SAP GUI is available,
+  `ZCL_ABAPGIT_HTTP->ACQUIRE_LOGIN_DETAILS` does not show a popup; it raises
+  "Unauthorized access. Check your credentials" (checked on dev, 2026-10-03).
+  `ZCL_BPC_GIT_REMOTE=>IS_AUTH_ERROR` recognizes that and the API answers with
+  `authRequired`, so the app can ask for the login (section 7.2).
 - The login manager caches credentials in static data, which lives only for
   the ABAP session. Stateless REST calls therefore set them again on every
   request.
 
-### 7.2 Credentials without a global user exit
+### 7.2 Git login, as in abapGit
 
-abapGit looks for an exit class named exactly `ZCL_ABAPGIT_USER_EXIT`. A system
-can have only one, and a customer may already have their own. If bpcGit
-shipped that class, installing bpcGit would collide with the customer's class
-or overwrite it. So bpcGit doesn't ship it, and it leaves an existing exit
-untouched.
+Decision (2026-10-03): no SM59 destination and no user exit. bpcGit does what
+abapGit does in SAP GUI: it never stores the login and asks for it only when
+the Git host wants it.
 
-Instead, at the start of every request that calls abapGit, `ZCL_BPC_GIT_REMOTE`
-does the following:
-
-1. It calls `ZCL_ABAPGIT_EXIT=>GET_INSTANCE( )`. This returns abapGit's normal
-   exit, which already passes calls on to the customer's
-   `ZCL_ABAPGIT_USER_EXIT` if one exists. bpcGit keeps it as the *inner* exit.
-2. It creates `ZCL_BPC_GIT_ABAPGIT_EXIT` around that inner exit.
-3. It calls `ZCL_ABAPGIT_INJECTOR=>SET_EXIT( )` with the new object. This is a
-   public method (checked on dev on 2026-10-03), and the injection only lasts
-   for the current internal session.
-
-`ZCL_BPC_GIT_ABAPGIT_EXIT` behaves like this:
-
-- **`CREATE_HTTP_CLIENT`:** if the URL belongs to a repository set up in
-  bpcGit, it returns a client from `cl_http_client=>create_by_destination`
-  using the SM59 destination configured for that repository. For any other
-  URL it passes the call to the inner exit.
-- **All other methods:** passed straight to the inner exit, so the customer's
-  exit logic still applies inside bpcGit requests.
-
-What this achieves:
-
-- **No naming conflict.** The class name is in bpcGit's own namespace.
-- **No effect outside bpcGit.** The abapGit UI, background jobs and other users
-  never see the injected exit, because it exists only in bpcGit's own sessions.
-- **Upgrade risk stays inside bpcGit.** If abapGit adds a method to
-  `ZIF_ABAPGIT_EXIT`, only `ZCL_BPC_GIT_ABAPGIT_EXIT` stops compiling, and only
-  bpcGit is affected. abapGit itself keeps working. The fix is still to add the
-  new method as a call to the inner exit.
-- **Caveat:** `ZCL_ABAPGIT_INJECTOR` isn't part of abapGit's documented API.
-  The same rule applies as for the other abapGit calls: only
-  `ZCL_BPC_GIT_REMOTE` uses it.
+- abapGit sends Git requests without credentials. A public repository can be
+  read that way (GitHub answers 200 to `git-upload-pack`), so pulls need no
+  login. Pushing always needs one (GitHub answers 401 to `git-receive-pack`),
+  and so does reading a private repository. On 401 abapGit asks once and keeps
+  the login in `ZCL_ABAPGIT_LOGIN_MANAGER` for the rest of the session.
+- In bpcGit the API answers a 401 from the Git host with HTTP 403 and
+  `"authRequired": true`. (Not 401, so the browser does not show its own
+  logon popup.) The app then shows a login dialog (user and personal access
+  token) and retries the request.
+- The app keeps the login in the page's memory only: not in local storage, not
+  in the model, never in a URL. It sends it in the POST body of each request
+  that talks to the Git host, and it is gone when the page reloads. "Log out"
+  forgets it earlier.
+- The server puts it in the login manager for that one request
+  (`ZCL_BPC_GIT_REMOTE` constructor) and never stores or logs it.
+- GitHub needs a personal access token, not the account password.
+- **Caveat:** the dev system is reached over plain HTTP (port 8000), so the
+  token crosses the network unencrypted between browser and SAP. Use the HTTPS
+  port if the network is not trusted.
 
 ### Constraints
 
@@ -254,22 +237,24 @@ What this achieves:
 
 ## 8. Security
 
-- **Token storage.** Do not store the token in plain text in a Z table. See Q1.
+- **Token storage.** The token is never stored, on the server or in the
+  browser (section 7.2).
 - **Authorization.** Only BPC admins of the environment can set up the
   repository and restore files. Committing needs at least read access to the
   files. The service checks this through the BPC user context.
-- **Logging.** Never log the token or send it back to the UI. The setup screen
+- **Logging.** Never log the token or send it back to the UI. The login dialog
   shows it masked.
+- **Cross-site requests.** Every POST must carry `X-Requested-With:
+  XMLHttpRequest`, which a form on another website cannot set.
 
 ## 9. Open questions
 
 - **Q1. Where is the token kept?** (a) encrypted in a Z table with SSF/`SECSTORE`,
   (b) in an SM59 HTTP destination maintained by Basis, with the app
   storing only the destination name, or (c) entered per session and never
-  stored. **Decision (2026-10-03): (b) as the main option, with (c) as an
-  optional extra.** Option (b) works through the user exit described in
-  section 7.2. Option (c) holds the token only for the session, through
-  `ZCL_ABAPGIT_LOGIN_MANAGER`.
+  stored. **Decision (2026-10-03, revised): (c) only, as abapGit does it
+  (section 7.2).** (b) was chosen first and then dropped: it needed an SM59
+  destination per repository and an injected abapGit exit.
   - How abapGit handles it (checked on the dev system through ADT on 2026-10-03):
     - Interactive use keeps credentials only in memory, in a static table in
       `ZCL_ABAPGIT_LOGIN_MANAGER`, and never stores them.
@@ -294,5 +279,5 @@ What this achieves:
   only on dev. bpcGit runs only in the development system, so QA and
   production need neither bpcGit nor abapGit.
 - **Q8. How does bpcGit hook into abapGit's user exit? Resolved (2026-10-03):**
-  it doesn't ship `ZCL_ABAPGIT_USER_EXIT`, because a customer may already
-  have one. Instead it injects its own wrapper exit at runtime (section 7.2).
+  it doesn't. Without SM59 (Q1) no exit is needed, so a customer's own
+  `ZCL_ABAPGIT_USER_EXIT` is never touched.

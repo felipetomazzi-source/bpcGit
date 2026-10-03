@@ -1,22 +1,13 @@
-"! bpcGit business logic: environments, SM59 destinations and the
-"! repository setup of an environment (table ZBPC_GIT_REPO).
+"! bpcGit business logic: environments and the repository setup of an
+"! environment (table ZBPC_GIT_REPO).
 CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES ty_environments TYPE STANDARD TABLE OF uj_appset_id WITH DEFAULT KEY.
-    TYPES:
-      BEGIN OF ty_destination,
-        name        TYPE rfcdes-rfcdest,
-        description TYPE rfcdoc-rfcdoc1,
-      END OF ty_destination,
-      ty_destinations TYPE STANDARD TABLE OF ty_destination WITH DEFAULT KEY.
 
     "! Environments the current user may access.
     METHODS get_environments
       RETURNING VALUE(rt_environments) TYPE ty_environments
       RAISING cx_uj_static_check.
-    "! HTTP connections to external servers (SM59 type G) a repository can use.
-    METHODS get_destinations
-      RETURNING VALUE(rt_destinations) TYPE ty_destinations.
     "! Repository setup of an environment; initial if it has none yet.
     METHODS get_config
       IMPORTING iv_environment TYPE uj_appset_id
@@ -51,16 +42,6 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DELETE ADJACENT DUPLICATES FROM rt_environments.
   ENDMETHOD.
 
-  METHOD get_destinations.
-    SELECT d~rfcdest AS name, t~rfcdoc1 AS description
-      FROM rfcdes AS d
-      LEFT OUTER JOIN rfcdoc AS t
-        ON t~rfcdest = d~rfcdest AND t~rfclang = @sy-langu
-      WHERE d~rfctype = 'G'
-      ORDER BY d~rfcdest
-      INTO CORRESPONDING FIELDS OF TABLE @rt_destinations.
-  ENDMETHOD.
-
   METHOD get_config.
     check_environment( iv_environment ).
     SELECT SINGLE * FROM zbpc_git_repo
@@ -90,14 +71,6 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    SELECT SINGLE rfcdest FROM rfcdes
-      WHERE rfcdest = @is_config-rfcdest AND rfctype = 'G'
-      INTO @DATA(lv_destination).
-    IF sy-subrc <> 0.
-      rv_message = 'Choose an SM59 HTTP connection to an external server (type G)'.
-      RETURN.
-    ENDIF.
-
     " One environment per repository: both would write the same paths.
     SELECT SINGLE appset FROM zbpc_git_repo
       WHERE url = @lv_url AND appset <> @is_config-appset
@@ -111,7 +84,6 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       appset     = is_config-appset
       url        = lv_url
       branch     = lv_branch
-      rfcdest    = lv_destination
       changed_by = sy-uname ).
     GET TIME STAMP FIELD ls_config-changed_at.
     MODIFY zbpc_git_repo FROM ls_config.

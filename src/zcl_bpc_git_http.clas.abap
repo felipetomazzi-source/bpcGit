@@ -11,9 +11,12 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
       BEGIN OF c_resource,
         ping         TYPE string VALUE '/ping',
         environments TYPE string VALUE '/environments',
-        destinations TYPE string VALUE '/destinations',
         config       TYPE string VALUE '/config',
+        connection   TYPE string VALUE '/connection',
       END OF c_resource.
+    "! Longest Git user name and access token accepted.
+    CONSTANTS c_max_user TYPE i VALUE 255 ##NO_TEXT.
+    CONSTANTS c_max_token TYPE i VALUE 1024 ##NO_TEXT.
     CONSTANTS:
       BEGIN OF c_method,
         get  TYPE string VALUE 'GET',
@@ -36,12 +39,16 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS handle_environments
       IMPORTING io_service TYPE REF TO zcl_bpc_git_service
       RAISING cx_uj_static_check.
-    METHODS handle_destinations
-      IMPORTING io_service TYPE REF TO zcl_bpc_git_service.
     METHODS handle_get_config
       IMPORTING io_service TYPE REF TO zcl_bpc_git_service
       RAISING cx_uj_static_check.
     METHODS handle_save_config
+      IMPORTING io_service TYPE REF TO zcl_bpc_git_service
+      RAISING cx_uj_static_check.
+    "! Reads the branches of the environment's repository; with the optional
+    "! user and token, also checks push access. Credentials are used for this
+    "! request only and never stored.
+    METHODS handle_test_connection
       IMPORTING io_service TYPE REF TO zcl_bpc_git_service
       RAISING cx_uj_static_check.
     "! Repository setup as JSON; "configured" is false when there is none.
@@ -51,9 +58,11 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS respond
       IMPORTING iv_code TYPE i iv_reason TYPE string iv_json TYPE string
                 iv_allow TYPE string OPTIONAL.
+    "! iv_auth_required tells the app to ask for the Git user and token.
     METHODS respond_error
       IMPORTING iv_code TYPE i iv_reason TYPE string iv_message TYPE string
-                iv_allow TYPE string OPTIONAL.
+                iv_allow TYPE string OPTIONAL
+                iv_auth_required TYPE abap_bool DEFAULT abap_false.
     "! JSON string literal, without the padding of fixed length fields.
     METHODS quote
       IMPORTING iv_value TYPE clike
@@ -80,15 +89,15 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
             IF require_method( c_method-get ).
               handle_environments( lo_service ).
             ENDIF.
-          WHEN c_resource-destinations.
-            IF require_method( c_method-get ).
-              handle_destinations( lo_service ).
-            ENDIF.
           WHEN c_resource-config.
             IF server->request->get_method( ) = c_method-get.
               handle_get_config( lo_service ).
             ELSEIF require_method( c_method-post ).
               handle_save_config( lo_service ).
+            ENDIF.
+          WHEN c_resource-connection.
+            IF require_method( c_method-post ).
+              handle_test_connection( lo_service ).
             ENDIF.
           WHEN OTHERS.
             respond_error( iv_code = 404 iv_reason = 'Not Found'
@@ -127,18 +136,6 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"environments":[` && lv_json && `]}` ).
   ENDMETHOD.
 
-  METHOD handle_destinations.
-    DATA lv_json TYPE string.
-    DATA lv_separator TYPE string.
-    DATA(lt_destinations) = io_service->get_destinations( ).
-    LOOP AT lt_destinations INTO DATA(ls_destination).
-      lv_json = lv_json && lv_separator && `{"name":` && quote( ls_destination-name ) &&
-        `,"description":` && quote( ls_destination-description ) && `}`.
-      lv_separator = ','.
-    ENDLOOP.
-    respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"destinations":[` && lv_json && `]}` ).
-  ENDMETHOD.
-
   METHOD handle_get_config.
     DATA lv_environment_id TYPE uj_appset_id.
     DESCRIBE FIELD lv_environment_id LENGTH DATA(lv_length) IN CHARACTER MODE.
@@ -158,22 +155,18 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     DESCRIBE FIELD ls_config-appset LENGTH DATA(lv_environment_length) IN CHARACTER MODE.
     DESCRIBE FIELD ls_config-url LENGTH DATA(lv_url_length) IN CHARACTER MODE.
     DESCRIBE FIELD ls_config-branch LENGTH DATA(lv_branch_length) IN CHARACTER MODE.
-    DESCRIBE FIELD ls_config-rfcdest LENGTH DATA(lv_destination_length) IN CHARACTER MODE.
     DATA(lv_environment) = read_field( iv_name = 'environment' iv_label = 'environment'
                                        iv_max_length = lv_environment_length ).
     DATA(lv_url) = read_field( iv_name = 'url' iv_label = 'repository URL'
                                iv_max_length = lv_url_length ).
     DATA(lv_branch) = read_field( iv_name = 'branch' iv_label = 'branch'
                                   iv_max_length = lv_branch_length iv_required = abap_false ).
-    DATA(lv_destination) = read_field( iv_name = 'destination' iv_label = 'SM59 destination'
-                                       iv_max_length = lv_destination_length ).
     IF mv_invalid = abap_true.
       RETURN.
     ENDIF.
     ls_config-appset = lv_environment.
     ls_config-url = lv_url.
     ls_config-branch = lv_branch.
-    ls_config-rfcdest = lv_destination.
 
     DATA(lv_message) = io_service->save_config( ls_config ).
     IF lv_message IS NOT INITIAL.
@@ -185,6 +178,60 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
                                     iv_environment = ls_config-appset ) ).
   ENDMETHOD.
 
+  METHOD handle_test_connection.
+    DATA lv_environment_id TYPE uj_appset_id.
+    DESCRIBE FIELD lv_environment_id LENGTH DATA(lv_length) IN CHARACTER MODE.
+    DATA(lv_environment) = read_field( iv_name = 'environment' iv_label = 'environment'
+                                       iv_max_length = lv_length ).
+    DATA(lv_user) = read_field( iv_name = 'user' iv_label = 'Git user'
+                                iv_max_length = c_max_user iv_required = abap_false ).
+    DATA(lv_token) = read_field( iv_name = 'token' iv_label = 'access token'
+                                 iv_max_length = c_max_token iv_required = abap_false ).
+    IF mv_invalid = abap_true.
+      RETURN.
+    ENDIF.
+    lv_environment_id = lv_environment.
+    DATA(ls_config) = io_service->get_config( lv_environment_id ).
+    IF ls_config IS INITIAL.
+      respond_error( iv_code = 400 iv_reason = 'Bad Request'
+                     iv_message = 'Save the repository setup first' ).
+      RETURN.
+    ENDIF.
+
+    TRY.
+        DATA(lo_remote) = NEW zcl_bpc_git_remote( iv_url = ls_config-url
+                                                  iv_user = lv_user
+                                                  iv_token = lv_token ).
+        DATA(ls_result) = lo_remote->test_connection( ls_config-branch ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_git).
+        IF zcl_bpc_git_remote=>is_auth_error( lx_git ) = abap_true.
+          respond_error( iv_code = 403 iv_reason = 'Forbidden' iv_auth_required = abap_true
+                         iv_message = COND #( WHEN lv_token IS INITIAL
+                                              THEN 'The Git host needs a login for this repository'
+                                              ELSE 'The Git host rejected the user or access token' ) ).
+        ELSE.
+          respond_error( iv_code = 502 iv_reason = 'Bad Gateway'
+                         iv_message = |Git host: { lx_git->get_text( ) }| ).
+        ENDIF.
+        RETURN.
+    ENDTRY.
+
+    DATA lv_branches TYPE string.
+    DATA lv_separator TYPE string.
+    LOOP AT ls_result-branches INTO DATA(lv_branch).
+      lv_branches = lv_branches && lv_separator && quote( lv_branch ).
+      lv_separator = ','.
+    ENDLOOP.
+    respond( iv_code = 200 iv_reason = 'OK' iv_json =
+      `{"url":` && quote( ls_config-url ) &&
+      `,"branch":` && quote( ls_config-branch ) &&
+      `,"branches":[` && lv_branches && `]` &&
+      `,"branchFound":` && COND string( WHEN ls_result-branch_found = abap_true THEN `true` ELSE `false` ) &&
+      `,"pushChecked":` && COND string( WHEN ls_result-push_checked = abap_true THEN `true` ELSE `false` ) &&
+      `,"pushOk":` && COND string( WHEN ls_result-push_ok = abap_true THEN `true` ELSE `false` ) &&
+      `,"pushMessage":` && quote( ls_result-push_message ) && `}` ).
+  ENDMETHOD.
+
   METHOD config_json.
     DATA lv_changed_at TYPE string.
     IF is_config-changed_at IS NOT INITIAL.
@@ -194,7 +241,6 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       `,"configured":` && COND string( WHEN is_config IS INITIAL THEN `false` ELSE `true` ) &&
       `,"url":` && quote( is_config-url ) &&
       `,"branch":` && quote( is_config-branch ) &&
-      `,"destination":` && quote( is_config-rfcdest ) &&
       `,"changedBy":` && quote( is_config-changed_by ) &&
       `,"changedAt":` && quote( lv_changed_at ) && `}`.
   ENDMETHOD.
@@ -240,7 +286,9 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
 
   METHOD respond_error.
     respond( iv_code = iv_code iv_reason = iv_reason iv_allow = iv_allow
-             iv_json = `{"error":{"message":` && quote( iv_message ) && `}}` ).
+             iv_json = `{"error":{"message":` && quote( iv_message ) &&
+                       COND string( WHEN iv_auth_required = abap_true THEN `,"authRequired":true` ) &&
+                       `}}` ).
   ENDMETHOD.
 
   METHOD quote.
