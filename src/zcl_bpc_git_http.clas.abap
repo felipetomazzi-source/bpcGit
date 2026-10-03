@@ -13,6 +13,7 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
         environments TYPE string VALUE '/environments',
         config       TYPE string VALUE '/config',
         connection   TYPE string VALUE '/connection',
+        workbooks    TYPE string VALUE '/workbooks',
       END OF c_resource.
     "! Longest Git user name and access token accepted.
     CONSTANTS c_max_user TYPE i VALUE 255 ##NO_TEXT.
@@ -51,6 +52,24 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS handle_test_connection
       IMPORTING io_service TYPE REF TO zcl_bpc_git_service
       RAISING cx_uj_static_check.
+    "! Workbooks of the environment in BPC and Git, with their status.
+    METHODS handle_workbooks
+      IMPORTING io_service TYPE REF TO zcl_bpc_git_service
+      RAISING cx_uj_static_check.
+    "! Reads environment, user and token of a request that talks to the Git
+    "! host and creates the Git client for the environment's repository.
+    "! Answers the request and returns nothing if the input is invalid.
+    METHODS create_remote
+      IMPORTING io_service TYPE REF TO zcl_bpc_git_service
+      EXPORTING ev_environment TYPE uj_appset_id
+                es_config TYPE zbpc_git_repo
+                eo_remote TYPE REF TO zcl_bpc_git_remote
+                ev_with_login TYPE abap_bool
+      RAISING cx_uj_static_check zcx_abapgit_exception.
+    "! Answers an abapGit error: asks for a login if the Git host wants one.
+    METHODS respond_git_error
+      IMPORTING ix_error TYPE REF TO zcx_abapgit_exception
+                iv_with_login TYPE abap_bool.
     "! Repository setup as JSON; "configured" is false when there is none.
     METHODS config_json
       IMPORTING is_config TYPE zbpc_git_repo iv_environment TYPE uj_appset_id
@@ -98,6 +117,10 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
           WHEN c_resource-connection.
             IF require_method( c_method-post ).
               handle_test_connection( lo_service ).
+            ENDIF.
+          WHEN c_resource-workbooks.
+            IF require_method( c_method-post ).
+              handle_workbooks( lo_service ).
             ENDIF.
           WHEN OTHERS.
             respond_error( iv_code = 404 iv_reason = 'Not Found'
@@ -179,40 +202,19 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD handle_test_connection.
-    DATA lv_environment_id TYPE uj_appset_id.
-    DESCRIBE FIELD lv_environment_id LENGTH DATA(lv_length) IN CHARACTER MODE.
-    DATA(lv_environment) = read_field( iv_name = 'environment' iv_label = 'environment'
-                                       iv_max_length = lv_length ).
-    DATA(lv_user) = read_field( iv_name = 'user' iv_label = 'Git user'
-                                iv_max_length = c_max_user iv_required = abap_false ).
-    DATA(lv_token) = read_field( iv_name = 'token' iv_label = 'access token'
-                                 iv_max_length = c_max_token iv_required = abap_false ).
-    IF mv_invalid = abap_true.
-      RETURN.
-    ENDIF.
-    lv_environment_id = lv_environment.
-    DATA(ls_config) = io_service->get_config( lv_environment_id ).
-    IF ls_config IS INITIAL.
-      respond_error( iv_code = 400 iv_reason = 'Bad Request'
-                     iv_message = 'Save the repository setup first' ).
-      RETURN.
-    ENDIF.
-
+    DATA ls_config TYPE zbpc_git_repo.
+    DATA lo_remote TYPE REF TO zcl_bpc_git_remote.
+    DATA lv_with_login TYPE abap_bool.
     TRY.
-        DATA(lo_remote) = NEW zcl_bpc_git_remote( iv_url = ls_config-url
-                                                  iv_user = lv_user
-                                                  iv_token = lv_token ).
+        create_remote( EXPORTING io_service = io_service
+                       IMPORTING es_config = ls_config eo_remote = lo_remote
+                                 ev_with_login = lv_with_login ).
+        IF lo_remote IS NOT BOUND.
+          RETURN.
+        ENDIF.
         DATA(ls_result) = lo_remote->test_connection( ls_config-branch ).
       CATCH zcx_abapgit_exception INTO DATA(lx_git).
-        IF zcl_bpc_git_remote=>is_auth_error( lx_git ) = abap_true.
-          respond_error( iv_code = 403 iv_reason = 'Forbidden' iv_auth_required = abap_true
-                         iv_message = COND #( WHEN lv_token IS INITIAL
-                                              THEN 'The Git host needs a login for this repository'
-                                              ELSE 'The Git host rejected the user or access token' ) ).
-        ELSE.
-          respond_error( iv_code = 502 iv_reason = 'Bad Gateway'
-                         iv_message = |Git host: { lx_git->get_text( ) }| ).
-        ENDIF.
+        respond_git_error( ix_error = lx_git iv_with_login = lv_with_login ).
         RETURN.
     ENDTRY.
 
@@ -230,6 +232,80 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       `,"pushChecked":` && COND string( WHEN ls_result-push_checked = abap_true THEN `true` ELSE `false` ) &&
       `,"pushOk":` && COND string( WHEN ls_result-push_ok = abap_true THEN `true` ELSE `false` ) &&
       `,"pushMessage":` && quote( ls_result-push_message ) && `}` ).
+  ENDMETHOD.
+
+  METHOD handle_workbooks.
+    DATA lv_environment TYPE uj_appset_id.
+    DATA ls_config TYPE zbpc_git_repo.
+    DATA lo_remote TYPE REF TO zcl_bpc_git_remote.
+    DATA lv_with_login TYPE abap_bool.
+    TRY.
+        create_remote( EXPORTING io_service = io_service
+                       IMPORTING ev_environment = lv_environment es_config = ls_config
+                                 eo_remote = lo_remote ev_with_login = lv_with_login ).
+        IF lo_remote IS NOT BOUND.
+          RETURN.
+        ENDIF.
+        DATA(ls_overview) = io_service->get_overview( iv_environment = lv_environment
+                                                      io_remote = lo_remote ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_git).
+        respond_git_error( ix_error = lx_git iv_with_login = lv_with_login ).
+        RETURN.
+    ENDTRY.
+
+    DATA lv_json TYPE string.
+    DATA lv_separator TYPE string.
+    LOOP AT ls_overview-workbooks INTO DATA(ls_workbook).
+      lv_json = lv_json && lv_separator &&
+        `{"path":` && quote( ls_workbook-path ) &&
+        `,"model":` && quote( ls_workbook-model ) &&
+        `,"status":` && quote( ls_workbook-status ) &&
+        `,"inBpc":` && COND string( WHEN ls_workbook-in_bpc = abap_true THEN `true` ELSE `false` ) &&
+        `,"changedAt":` && quote( ls_workbook-changed_at ) &&
+        `,"changedBy":` && quote( ls_workbook-changed_by ) &&
+        `,"size":` && |{ ls_workbook-size }| && `}`.
+      lv_separator = ','.
+    ENDLOOP.
+    respond( iv_code = 200 iv_reason = 'OK' iv_json =
+      `{"branch":` && quote( ls_config-branch ) &&
+      `,"branchFound":` && COND string( WHEN ls_overview-branch_found = abap_true THEN `true` ELSE `false` ) &&
+      `,"commit":` && quote( ls_overview-commit ) &&
+      `,"workbooks":[` && lv_json && `]}` ).
+  ENDMETHOD.
+
+  METHOD create_remote.
+    CLEAR: ev_environment, es_config, eo_remote, ev_with_login.
+    DESCRIBE FIELD ev_environment LENGTH DATA(lv_length) IN CHARACTER MODE.
+    DATA(lv_environment) = read_field( iv_name = 'environment' iv_label = 'environment'
+                                       iv_max_length = lv_length ).
+    DATA(lv_user) = read_field( iv_name = 'user' iv_label = 'Git user'
+                                iv_max_length = c_max_user iv_required = abap_false ).
+    DATA(lv_token) = read_field( iv_name = 'token' iv_label = 'access token'
+                                 iv_max_length = c_max_token iv_required = abap_false ).
+    IF mv_invalid = abap_true.
+      RETURN.
+    ENDIF.
+    ev_environment = lv_environment.
+    es_config = io_service->get_config( ev_environment ).
+    IF es_config IS INITIAL.
+      respond_error( iv_code = 400 iv_reason = 'Bad Request'
+                     iv_message = 'Save the repository setup first' ).
+      RETURN.
+    ENDIF.
+    ev_with_login = xsdbool( lv_user IS NOT INITIAL AND lv_token IS NOT INITIAL ).
+    eo_remote = NEW zcl_bpc_git_remote( iv_url = es_config-url iv_user = lv_user iv_token = lv_token ).
+  ENDMETHOD.
+
+  METHOD respond_git_error.
+    IF zcl_bpc_git_remote=>is_auth_error( ix_error ) = abap_true.
+      respond_error( iv_code = 403 iv_reason = 'Forbidden' iv_auth_required = abap_true
+                     iv_message = COND #( WHEN iv_with_login = abap_true
+                                          THEN 'The Git host rejected the user or access token'
+                                          ELSE 'The Git host needs a login for this repository' ) ).
+    ELSE.
+      respond_error( iv_code = 502 iv_reason = 'Bad Gateway'
+                     iv_message = |Git host: { ix_error->get_text( ) }| ).
+    ENDIF.
   ENDMETHOD.
 
   METHOD config_json.

@@ -92,6 +92,8 @@ workbook's path, last change in BPC (user and timestamp), size and status:
 | New in BPC | Not in Git yet |
 | New in Git | In Git, missing from BPC |
 | Deleted in BPC | Synced before, now missing from BPC |
+| Deleted in Git | Synced before, now missing from Git |
+| Differs, never synced | In BPC and Git with different content, and no sync record yet |
 
 The screen has filters by status and model, plus a search box.
 
@@ -140,9 +142,18 @@ restored with F5.
 
 ## 6. Change detection
 
-- For each tracked file, a Z table stores the BPC path, the Git blob SHA of the
-  last synced content, the commit SHA, and the BPC last-change timestamp at
-  sync time.
+- For each tracked file, table `ZBPC_GIT_STATE` stores the BPC document name,
+  the Git blob SHA of the last synced content, the commit SHA, the BPC
+  last-change timestamp at sync time, and who synced it when. Commit (F4) and
+  restore (F5) write it; the overview (F3) only reads it.
+- If BPC and Git have the same content, the workbook is Unchanged, with or
+  without a sync record. Without a record and with different content, it is
+  "Differs, never synced", because the app cannot tell which side changed.
+- BPC content is read and hashed only when needed: when the workbook is also
+  in Git and its BPC timestamp differs from the sync record (or there is no
+  record). An empty repository therefore costs no content reads.
+- Files in Git count as workbooks only below `<MODEL>/EEXCEL/` with a workbook
+  extension; anything else (README.md, .bpcgit.json) is ignored.
 - Modified in BPC: the BPC `LSTMOD_DATE`/`LSTMOD_TIME` has changed **and** the
   Git blob SHA-1 of the current content differs. The SHA comes from
   `ZCL_ABAPGIT_HASH`.
@@ -266,8 +277,9 @@ the Git host wants it.
       bpcGit should not copy that.
 - **Q2. One shared connection or one per user?** Proposal: one per
   environment, shared, with the BPC user recorded as the commit author.
-- **Q3. Should BACKUP folders and `COPY OF ...` files be excluded?** Proposal:
-  apply a default exclusion pattern that the configuration can change.
+- **Q3. Should BACKUP folders and `COPY OF ...` files be excluded?** Resolved
+  (2026-10-03, step 5): they are listed, but the overview hides them by default
+  ("Hide backups and copies", on). No configuration needed for now.
 - **Q4. Should workbooks be unzipped for readable diffs?** `.xlsx` is a zip of
   XML. Storing the unzipped parts gives readable diffs on GitHub, but the
   restore has to rebuild the file byte for byte. Proposal: not in v1.

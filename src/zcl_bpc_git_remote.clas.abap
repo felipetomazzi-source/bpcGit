@@ -16,6 +16,22 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
         push_ok      TYPE abap_bool,
         push_message TYPE string,
       END OF ty_connection.
+    TYPES:
+      BEGIN OF ty_file,
+        "! Repository path without leading slash, e.g. AGGR_OPEX/EEXCEL/X.XLSX
+        path TYPE string,
+        "! Git blob SHA-1, lower case
+        sha1 TYPE string,
+      END OF ty_file,
+      ty_files TYPE SORTED TABLE OF ty_file WITH UNIQUE KEY path.
+    TYPES:
+      BEGIN OF ty_branch_content,
+        "! False if the branch does not exist yet, e.g. in an empty repository
+        branch_found TYPE abap_bool,
+        "! Head commit of the branch
+        commit       TYPE string,
+        files        TYPE ty_files,
+      END OF ty_branch_content.
 
     "! Version of the installed abapGit developer version, initial if it is
     "! missing. Read dynamically so the caller can report a missing abapGit.
@@ -25,6 +41,11 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS is_auth_error
       IMPORTING ix_error TYPE REF TO zcx_abapgit_exception
       RETURNING VALUE(rv_auth_error) TYPE abap_bool.
+    "! Git blob SHA-1 of a file content, lower case, as Git computes it.
+    CLASS-METHODS blob_sha1
+      IMPORTING iv_data TYPE xstring
+      RETURNING VALUE(rv_sha1) TYPE string
+      RAISING zcx_abapgit_exception.
     METHODS constructor
       IMPORTING iv_url TYPE csequence
                 iv_user TYPE string OPTIONAL
@@ -36,7 +57,13 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_branch TYPE csequence
       RETURNING VALUE(rs_result) TYPE ty_connection
       RAISING zcx_abapgit_exception.
+    "! Paths and blob hashes of all files at the head of a branch.
+    METHODS read_branch
+      IMPORTING iv_branch TYPE csequence
+      RETURNING VALUE(rs_content) TYPE ty_branch_content
+      RAISING zcx_abapgit_exception.
   PRIVATE SECTION.
+    CONSTANTS c_heads TYPE string VALUE 'refs/heads/' ##NO_TEXT.
     DATA mv_url TYPE string.
     DATA mv_has_credentials TYPE abap_bool.
     "! Asks for the push advertisement (git-receive-pack), which the Git host
@@ -58,6 +85,10 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     " abapGit has no own exception for this; both of its texts say so
     " ('Unauthorized access. Check your credentials' and '... (HTTP 401) ...').
     rv_auth_error = boolc( ix_error->get_text( ) CS 'Unauthorized' ).
+  ENDMETHOD.
+
+  METHOD blob_sha1.
+    rv_sha1 = to_lower( zcl_abapgit_hash=>sha1_blob( iv_data ) ).
   ENDMETHOD.
 
   METHOD constructor.
@@ -91,6 +122,26 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
           rs_result-push_message = lx_push->get_text( ).
       ENDTRY.
     ENDIF.
+  ENDMETHOD.
+
+  METHOD read_branch.
+    DATA(lv_ref) = c_heads && iv_branch.
+    DATA(lt_branches) = zcl_abapgit_git_transport=>branches( mv_url )->get_branches_only( ).
+    IF NOT line_exists( lt_branches[ KEY name_key name = lv_ref ] ).
+      RETURN.
+    ENDIF.
+    rs_content-branch_found = abap_true.
+
+    DATA(ls_pull) = zcl_abapgit_git_porcelain=>pull_by_branch( iv_url = mv_url iv_branch_name = lv_ref ).
+    rs_content-commit = to_lower( ls_pull-commit ).
+    LOOP AT ls_pull-files INTO DATA(ls_file).
+      " abapGit paths start and end with a slash, e.g. /AGGR_OPEX/EEXCEL/
+      DATA(lv_path) = ls_file-path && ls_file-filename.
+      IF strlen( lv_path ) > 1 AND lv_path(1) = '/'.
+        lv_path = lv_path+1.
+      ENDIF.
+      INSERT VALUE #( path = lv_path sha1 = to_lower( ls_file-sha1 ) ) INTO TABLE rs_content-files.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD check_push_access.
