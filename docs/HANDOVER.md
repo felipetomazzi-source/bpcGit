@@ -13,6 +13,19 @@ dimension-selection/load journey passes all seven assertions in Chromium driven
 by Playwright. It checks actual controls, bindings and rendered member names;
 it does not replace deployed SAP backend acceptance. See tests/opa/README.md.
 
+2026-10-04 deployed smoke test: the user explicitly authorized browser access
+and abapGit pull/activation. Playwright used SAP GUI for HTML transaction
+ZABAPGIT to pull main into ZBPC_GIT and activate the BSP pages; abapGit then
+reported zero local/remote changes. The deployed application reports 0.14.0
+on SAP UI5 1.52.18. Dimension-member metadata loads, defaults to ACCOUNT and
+disables model selection. ACCOUNT loaded 958 members in 4.8 seconds (SAP listing
+239 ms, Git 4110 ms, comparison 337 ms), all New in BPC. Selecting one enables
+Commit and History while Restore stays disabled. History opens successfully
+and reports no changes for the uncommitted member. No BPC member save/restore,
+processing or content-repository commit was performed during this smoke test;
+those acceptance cases remain pending. Browser SAP/abapGit access was expressly
+authorized by the user; ADT source writes remain outside the approved workflow.
+
 Packages and links are implemented; SAP acceptance is pending. Version 0.9.3
 groups transformation/conversion workbooks with their definitions into one
 overview row and one commit/restore selection. Pair restore is transactional
