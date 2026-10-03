@@ -6,9 +6,12 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     TYPES ty_environments TYPE STANDARD TABLE OF uj_appset_id WITH DEFAULT KEY.
     TYPES:
       BEGIN OF ty_workbook,
-        "! Repository path, e.g. AGGR_OPEX/EEXCEL/REPORTS/X.XLSX
+        "! Repository path, e.g. AGGR_OPEX/EEXCEL/REPORTS/X.XLSX or
+        "! AGGR_OPEX/TEAM FILES/<team>/EEXCEL/REPORTS/X.XLSX
         path       TYPE string,
         model      TYPE string,
+        "! Team folder of a team workbook; initial for company (public) ones
+        team       TYPE string,
         "! One of c_status
         status     TYPE string,
         in_bpc     TYPE abap_bool,
@@ -102,8 +105,10 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
 
     CONSTANTS c_default_branch TYPE string VALUE 'main' ##NO_TEXT.
     CONSTANTS c_branch_prefix TYPE string VALUE 'refs/heads/' ##NO_TEXT.
-    "! Folder of the EPM workbook libraries below each model (section 3).
+    "! Folder of the EPM workbook libraries below each model (section 3), and
+    "! of the team folders, which each have their own EEXCEL libraries.
     CONSTANTS c_webexcel_folder TYPE string VALUE 'EEXCEL' ##NO_TEXT.
+    CONSTANTS c_team_folder TYPE string VALUE 'TEAM FILES' ##NO_TEXT.
     "! Recognised workbook extensions; the file service stores them as DOCTYPE.
     CONSTANTS c_workbook_types TYPE string VALUE 'XLSX XLSM XLS XLTX XLTM' ##NO_TEXT.
 
@@ -121,15 +126,21 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING VALUE(ro_files) TYPE REF TO cl_ujf_file_service_mgr.
     METHODS get_workbook_types
       RETURNING VALUE(rt_types) TYPE string_table.
-    "! Workbooks below \ROOT\WEBFOLDERS\<env>\<model>\EEXCEL\ of all models.
+    "! Workbooks of all models: below <model>\EEXCEL\ (company) and below
+    "! <model>\TEAM FILES\<team>\EEXCEL\ (teams).
     METHODS list_workbooks
       IMPORTING iv_environment TYPE uj_appset_id
       RETURNING VALUE(rt_workbooks) TYPE ty_bpc_workbooks
       RAISING cx_uj_static_check.
-    "! True for a repository path <model>/EEXCEL/.../<name>.<workbook type>.
+    "! True for a repository path <model>/EEXCEL/.../<name>.<workbook type>
+    "! or <model>/TEAM FILES/<team>/EEXCEL/.../<name>.<workbook type>.
     METHODS is_workbook_path
       IMPORTING iv_path TYPE string
       RETURNING VALUE(rv_workbook) TYPE abap_bool.
+    "! Team folder of a repository path; initial for company workbooks.
+    METHODS get_team
+      IMPORTING iv_path TYPE string
+      RETURNING VALUE(rv_team) TYPE string.
     "! BPC document name of a repository path, and the reverse.
     METHODS to_docname
       IMPORTING iv_environment TYPE uj_appset_id iv_path TYPE string
@@ -229,6 +240,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       DATA(ls_row) = VALUE ty_workbook(
         path       = ls_bpc-path
         model      = ls_bpc-model
+        team       = get_team( ls_bpc-path )
         in_bpc     = abap_true
         changed_at = |{ ls_bpc-lstmod_date DATE = ISO } { ls_bpc-lstmod_time TIME = ISO }|
         changed_by = ls_bpc-lstmod_user
@@ -259,6 +271,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       APPEND VALUE #(
         path    = ls_git-path
         model   = substring_before( val = ls_git-path sub = '/' )
+        team    = get_team( ls_git-path )
         docname = lv_docname
         status  = COND #( WHEN line_exists( lt_states[ docname = lv_docname ] )
                           THEN c_status-deleted_bpc ELSE c_status-new_git ) )
@@ -384,6 +397,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
 
   METHOD list_workbooks.
     DATA lt_documents TYPE ujf_t_doc.
+    DATA lt_directories TYPE string_table.
     DATA lv_directory TYPE ujf_doctree-docname.
     DATA lv_doctype TYPE ujf_doc-doctype.
 
@@ -391,29 +405,39 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DATA(lt_models) = get_models( iv_environment ).
     DATA(lo_files) = get_file_service( iv_environment ).
     LOOP AT lt_models INTO DATA(lv_model).
-      lv_directory = |\\ROOT\\WEBFOLDERS\\{ iv_environment }\\{ lv_model }\\{ c_webexcel_folder }\\|.
-      " The file service lists one document type at a time
-      LOOP AT lt_types INTO DATA(lv_type).
-        lv_doctype = lv_type.
-        CLEAR lt_documents.
-        TRY.
-            lo_files->list_directory(
-              EXPORTING i_dirname = lv_directory i_doctype = lv_doctype
-                        i_sort = abap_false i_include_subfldrs = abap_true
-              IMPORTING et_document_list = lt_documents ).
-          CATCH cx_ujf_file_service_error.
-            " A model without workbooks has no EEXCEL folder
-            CLEAR lt_documents.
-        ENDTRY.
-        LOOP AT lt_documents INTO DATA(ls_document).
-          INSERT VALUE #( path        = to_path( iv_environment = iv_environment
-                                                 iv_docname = ls_document-docname )
-                          docname     = ls_document-docname
-                          model       = lv_model
-                          lstmod_date = ls_document-lstmod_date
-                          lstmod_time = ls_document-lstmod_time
-                          lstmod_user = ls_document-lstmod_user
-                          size        = ls_document-doc_length ) INTO TABLE rt_workbooks.
+      DATA(lv_model_folder) = |\\ROOT\\WEBFOLDERS\\{ iv_environment }\\{ lv_model }\\|.
+      " Team folders also hold Data Manager files; is_workbook_path keeps
+      " only those below a team's EEXCEL folder.
+      lt_directories = VALUE #( ( lv_model_folder && c_webexcel_folder && `\` )
+                                ( lv_model_folder && c_team_folder && `\` ) ).
+      LOOP AT lt_directories INTO DATA(lv_folder).
+        lv_directory = lv_folder.
+        " The file service lists one document type at a time
+        LOOP AT lt_types INTO DATA(lv_type).
+          lv_doctype = lv_type.
+          CLEAR lt_documents.
+          TRY.
+              lo_files->list_directory(
+                EXPORTING i_dirname = lv_directory i_doctype = lv_doctype
+                          i_sort = abap_false i_include_subfldrs = abap_true
+                IMPORTING et_document_list = lt_documents ).
+            CATCH cx_ujf_file_service_error.
+              " A model without workbooks or teams has no such folder
+              CLEAR lt_documents.
+          ENDTRY.
+          LOOP AT lt_documents INTO DATA(ls_document).
+            DATA(lv_path) = to_path( iv_environment = iv_environment iv_docname = ls_document-docname ).
+            IF is_workbook_path( lv_path ) = abap_false.
+              CONTINUE.
+            ENDIF.
+            INSERT VALUE #( path        = lv_path
+                            docname     = ls_document-docname
+                            model       = lv_model
+                            lstmod_date = ls_document-lstmod_date
+                            lstmod_time = ls_document-lstmod_time
+                            lstmod_user = ls_document-lstmod_user
+                            size        = ls_document-doc_length ) INTO TABLE rt_workbooks.
+          ENDLOOP.
         ENDLOOP.
       ENDLOOP.
     ENDLOOP.
@@ -422,12 +446,25 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   METHOD is_workbook_path.
     DATA lt_parts TYPE string_table.
     SPLIT iv_path AT '/' INTO TABLE lt_parts.
-    IF lines( lt_parts ) < 3 OR lt_parts[ 2 ] <> c_webexcel_folder.
+    " Index of the EEXCEL folder: company <model>/EEXCEL/..., team
+    " <model>/TEAM FILES/<team>/EEXCEL/...; a file name must follow it
+    DATA(lv_webexcel) = COND i( WHEN lines( lt_parts ) >= 3 AND lt_parts[ 2 ] = c_webexcel_folder THEN 2
+                                WHEN lines( lt_parts ) >= 5 AND lt_parts[ 2 ] = c_team_folder
+                                     AND lt_parts[ 4 ] = c_webexcel_folder THEN 4 ).
+    IF lv_webexcel = 0 OR lines( lt_parts ) <= lv_webexcel.
       RETURN.
     ENDIF.
     DATA(lv_type) = to_upper( substring_after( val = iv_path sub = '.' occ = -1 ) ).
     DATA(lt_types) = get_workbook_types( ).
-    rv_workbook = boolc( line_exists( lt_types[ table_line = lv_type ] ) ).
+    rv_workbook = xsdbool( line_exists( lt_types[ table_line = lv_type ] ) ).
+  ENDMETHOD.
+
+  METHOD get_team.
+    DATA lt_parts TYPE string_table.
+    SPLIT iv_path AT '/' INTO TABLE lt_parts.
+    IF lines( lt_parts ) >= 3 AND lt_parts[ 2 ] = c_team_folder.
+      rv_team = lt_parts[ 3 ].
+    ENDIF.
   ENDMETHOD.
 
   METHOD get_workbook_types.

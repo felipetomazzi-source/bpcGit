@@ -273,6 +273,7 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       lv_json = lv_json && lv_separator &&
         `{"path":` && quote( ls_workbook-path ) &&
         `,"model":` && quote( ls_workbook-model ) &&
+        `,"team":` && quote( ls_workbook-team ) &&
         `,"status":` && quote( ls_workbook-status ) &&
         `,"inBpc":` && COND string( WHEN ls_workbook-in_bpc = abap_true THEN `true` ELSE `false` ) &&
         `,"changedAt":` && quote( ls_workbook-changed_at ) &&

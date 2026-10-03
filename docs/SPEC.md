@@ -46,9 +46,20 @@ The standard folder for each model is set in `UJF_DOCMAP`
 | Books | `...\EEXCEL\BOOKS\` |
 | Distribution lists | `...\EEXCEL\PDBOOKS\` |
 
-**Rule v1:** a workbook is any document (`DIR_DOC = 'D'`) under
-`\ROOT\WEBFOLDERS\<ENV>\<MODEL>\EEXCEL\` (subfolders included) with extension
-`.xlsx`, `.xlsm`, `.xltx`, `.xltm` or `.xls`.
+**Rule v1:** a workbook is any document (`DIR_DOC = 'D'`) with extension
+`.xlsx`, `.xlsm`, `.xltx`, `.xltm` or `.xls` under one of these folders
+(subfolders included):
+
+| Location | Folder below `\ROOT\WEBFOLDERS\<ENV>\` | EPM shows it as |
+|---|---|---|
+| Company (public) | `<MODEL>\EEXCEL\` | Company (Public) |
+| Team | `<MODEL>\TEAM FILES\<TEAM>\EEXCEL\` | `<team>\WEBEXCEL\TEAMTEMPLATELIBRARY\` |
+
+Team folders also hold Data Manager files (e.g. `TEAM FILES\ADMIN\DATAMANAGER\`,
+with `.XLS` conversion files); only files below the team's `EEXCEL` folder count.
+In both locations the libraries are `REPORTS`, `INPUT SCHEDULES`, `BOOKS` and
+`PDBOOKS`. Checked on dev on 2026-10-03: `AGGR_OPEX` has 19 team folders, e.g.
+`CAPITAL CONTRIBUTION\EEXCEL\INPUT SCHEDULES\BOOK1.XLSX`.
 
 On the dev system, `CH_PLANNING\AGGR_OPEX\EEXCEL\` contains files of this kind,
 together with many `BACKUP\` folders and `COPY OF ...` files. See open question Q3.
