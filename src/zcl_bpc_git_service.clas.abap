@@ -1,6 +1,7 @@
 "! bpcGit business logic: environments, the repository setup of an
 "! environment (table ZBPC_GIT_REPO) and the Git status of its EPM workbooks,
-"! logic scripts, transformation and conversion files (docs/SPEC.md 3, 6).
+"! logic scripts, transformation and conversion files, Data Manager packages
+"! and package links (docs/SPEC.md sections 3 and 6).
 CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES ty_environments TYPE STANDARD TABLE OF uj_appset_id WITH DEFAULT KEY.
@@ -28,6 +29,9 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         git_sha1    TYPE string,
         lstmod_date TYPE uj_lstmod_date,
         lstmod_time TYPE uj_lstmod_time,
+        "! Packages and links are no BPC documents: bpcGit generates their file
+        generated   TYPE abap_bool,
+        content     TYPE xstring,
       END OF ty_workbook,
       ty_workbooks TYPE STANDARD TABLE OF ty_workbook WITH DEFAULT KEY.
     TYPES:
@@ -49,6 +53,8 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         script         TYPE string VALUE 'SCRIPT',
         transformation TYPE string VALUE 'TRANSFORMATION',
         conversion     TYPE string VALUE 'CONVERSION',
+        package        TYPE string VALUE 'PACKAGE',
+        link           TYPE string VALUE 'LINK',
       END OF c_kind.
     CONSTANTS:
       BEGIN OF c_status,
@@ -140,6 +146,9 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         lstmod_time TYPE uj_lstmod_time,
         lstmod_user TYPE string,
         size        TYPE i,
+        "! Packages and links are no BPC documents: bpcGit generates their file
+        generated   TYPE abap_bool,
+        content     TYPE xstring,
       END OF ty_bpc_workbook,
       ty_bpc_workbooks TYPE SORTED TABLE OF ty_bpc_workbook WITH UNIQUE KEY path.
     TYPES ty_states TYPE SORTED TABLE OF zbpc_git_state WITH UNIQUE KEY docname.
@@ -164,6 +173,29 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_conversion_folder TYPE string VALUE 'CONVERSIONFILES' ##NO_TEXT.
     CONSTANTS c_transformation_types TYPE string VALUE 'TDM XLS XLSX' ##NO_TEXT.
     CONSTANTS c_conversion_types TYPE string VALUE 'CDM XLS XLSX' ##NO_TEXT.
+    "! Data Manager packages and package links are table entries, not documents.
+    "! bpcGit writes them as XML files (section 3.4):
+    "!   <model>/DATAMANAGER/PACKAGES/<group>/<package>.xml (teams: below
+    "!   <model>/TEAM FILES/<team>/) and <model>/DATAMANAGER/PACKAGELINKS/<name>.xml
+    CONSTANTS c_package_folder TYPE string VALUE 'PACKAGES' ##NO_TEXT.
+    CONSTANTS c_link_folder TYPE string VALUE 'PACKAGELINKS' ##NO_TEXT.
+    CONSTANTS c_xml_type TYPE string VALUE 'XML' ##NO_TEXT.
+    "! Line separator of package scripts in UJD_INSTRUCTION2
+    "! (CL_UJD_PACKAGE=>GC_INSTRUCTION_SEPARATOR)
+    CONSTANTS c_script_separator TYPE string VALUE '<BR>' ##NO_TEXT.
+    TYPES:
+      BEGIN OF ty_package,
+        group      TYPE uj_pack_grp_id,
+        id         TYPE uj_package_id,
+        team       TYPE uj_team_id,
+        descr      TYPE uj_desc,
+        type       TYPE uj_pack_type,
+        user_group TYPE uj_user_group,
+        chain      TYPE rspc_chain,
+        "! False if the package runs its process chain's default script
+        has_script TYPE abap_bool,
+        script     TYPE string_table,
+      END OF ty_package.
     TYPES:
       BEGIN OF ty_folder,
         "! Below \ROOT\WEBFOLDERS\<env>\, with trailing backslash
@@ -203,6 +235,47 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS get_kind
       IMPORTING iv_path TYPE string
       RETURNING VALUE(rv_kind) TYPE string.
+    "! Packages and package links of a model, as generated files.
+    METHODS list_packages
+      IMPORTING iv_environment TYPE uj_appset_id iv_model TYPE uj_appl_id
+      CHANGING ct_workbooks TYPE ty_bpc_workbooks.
+    METHODS list_links
+      IMPORTING iv_environment TYPE uj_appset_id iv_model TYPE uj_appl_id
+      CHANGING ct_workbooks TYPE ty_bpc_workbooks.
+    "! A package as bpcGit's XML file, one script line per element.
+    METHODS package_to_xml
+      IMPORTING is_package TYPE ty_package
+      RETURNING VALUE(rv_xml) TYPE xstring.
+    METHODS xml_element
+      IMPORTING iv_name TYPE string iv_value TYPE clike
+      RETURNING VALUE(rv_xml) TYPE string.
+    "! Reads a package file; ev_error tells what is wrong with it.
+    METHODS parse_package
+      IMPORTING iv_xml TYPE xstring
+      EXPORTING es_package TYPE ty_package
+                ev_error TYPE string.
+    "! Name of a package link, from the first NAME property of its XML.
+    METHODS get_link_name
+      IMPORTING iv_xml TYPE string
+      RETURNING VALUE(rv_name) TYPE string.
+    "! Link XML with its system-specific ID property set to iv_id (or blank).
+    METHODS set_link_id
+      IMPORTING iv_xml TYPE string iv_id TYPE csequence
+      RETURNING VALUE(rv_xml) TYPE string.
+    "! File or folder name for a BPC name; characters Git paths cannot hold become _.
+    METHODS to_file_name
+      IMPORTING iv_name TYPE csequence
+      RETURNING VALUE(rv_name) TYPE string.
+    "! Writes a package or package link from its XML into BPC through BPC's own
+    "! API, or deletes it. Returns a message if that did not work.
+    METHODS restore_package
+      IMPORTING iv_environment TYPE uj_appset_id iv_model TYPE string
+                iv_xml TYPE xstring iv_delete TYPE abap_bool iv_path TYPE string
+      RETURNING VALUE(rv_message) TYPE string.
+    METHODS restore_link
+      IMPORTING iv_environment TYPE uj_appset_id iv_model TYPE string
+                iv_xml TYPE xstring iv_delete TYPE abap_bool iv_path TYPE string
+      RETURNING VALUE(rv_message) TYPE string.
     "! True if a space-separated type list contains the type.
     METHODS has_type
       IMPORTING iv_types TYPE string iv_type TYPE string
@@ -339,12 +412,15 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         model      = ls_bpc-model
         team       = get_team( ls_bpc-path )
         in_bpc     = abap_true
-        changed_at = |{ ls_bpc-lstmod_date DATE = ISO } { ls_bpc-lstmod_time TIME = ISO }|
+        changed_at = COND #( WHEN ls_bpc-lstmod_date IS NOT INITIAL
+                             THEN |{ ls_bpc-lstmod_date DATE = ISO } { ls_bpc-lstmod_time TIME = ISO }| )
         changed_by = ls_bpc-lstmod_user
         size       = ls_bpc-size
         docname     = ls_bpc-docname
         lstmod_date = ls_bpc-lstmod_date
-        lstmod_time = ls_bpc-lstmod_time ).
+        lstmod_time = ls_bpc-lstmod_time
+        generated   = ls_bpc-generated
+        content     = ls_bpc-content ).
       CLEAR ls_state.
       READ TABLE lt_states INTO ls_state WITH TABLE KEY docname = ls_bpc-docname.
       lv_synced = boolc( sy-subrc = 0 ).
@@ -428,8 +504,12 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         APPEND ls_workbook-docname TO lt_unsynced.
       ELSE.
         CLEAR lv_document.
-        lo_files->get_document( EXPORTING i_docname = ls_workbook-docname i_retzip = abap_false
-                                IMPORTING e_document_content = lv_document ).
+        IF ls_workbook-generated = abap_true.
+          lv_document = ls_workbook-content.
+        ELSE.
+          lo_files->get_document( EXPORTING i_docname = ls_workbook-docname i_retzip = abap_false
+                                  IMPORTING e_document_content = lv_document ).
+        ENDIF.
         APPEND VALUE #( path = lv_path data = lv_document ) TO lt_changes.
         APPEND VALUE #( appset      = iv_environment
                         docname     = ls_workbook-docname
@@ -507,6 +587,8 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       APPEND VALUE #( path = ls_file-path ok = xsdbool( lv_message IS INITIAL ) message = lv_message )
         TO et_results.
       IF lv_message IS NOT INITIAL.
+        " BPC's package APIs do not commit; undo what this file wrote
+        ROLLBACK WORK.
         CONTINUE.
       ENDIF.
 
@@ -516,8 +598,10 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       ELSE.
         DATA ls_attributes TYPE ujf_doc.
         CLEAR ls_attributes.
-        lo_files->get_document_attributes( EXPORTING i_docname = ls_file-docname
-                                           IMPORTING es_document_attributes = ls_attributes ).
+        IF ls_file-generated = abap_false AND ls_file-kind <> c_kind-package AND ls_file-kind <> c_kind-link.
+          lo_files->get_document_attributes( EXPORTING i_docname = ls_file-docname
+                                             IMPORTING es_document_attributes = ls_attributes ).
+        ENDIF.
         DATA ls_state TYPE zbpc_git_state.
         ls_state = VALUE #( appset      = iv_environment
                             docname     = ls_file-docname
@@ -529,6 +613,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         GET TIME STAMP FIELD ls_state-synced_at.
         MODIFY zbpc_git_state FROM ls_state.
       ENDIF.
+      COMMIT WORK.
     ENDLOOP.
     COMMIT WORK.
   ENDMETHOD.
@@ -536,6 +621,21 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   METHOD restore_file.
     DATA lv_locked TYPE uj_flg.
     DATA lv_content TYPE xstring.
+
+    IF is_file-kind = c_kind-package OR is_file-kind = c_kind-link.
+      " To delete, the BPC version tells what; otherwise the Git version is written
+      DATA(lv_delete) = xsdbool( is_file-status = c_status-deleted_git ).
+      DATA(lv_xml) = COND xstring( WHEN lv_delete = abap_true THEN is_file-content
+                                   ELSE io_remote->get_content( is_file-path ) ).
+      IF is_file-kind = c_kind-package.
+        rv_message = restore_package( iv_environment = iv_environment iv_model = is_file-model
+                                      iv_xml = lv_xml iv_delete = lv_delete iv_path = is_file-path ).
+      ELSE.
+        rv_message = restore_link( iv_environment = iv_environment iv_model = is_file-model
+                                   iv_xml = lv_xml iv_delete = lv_delete iv_path = is_file-path ).
+      ENDIF.
+      RETURN.
+    ENDIF.
 
     TRY.
         " Never overwrite a document whose lock flag is set (e.g. open for editing)
@@ -646,7 +746,10 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   METHOD compare.
     DATA lv_document TYPE xstring.
     DATA lv_bpc_sha1 TYPE string.
-    IF iv_synced = abap_true
+    IF is_bpc-generated = abap_true.
+      " No BPC timestamp to rely on; the generated file is at hand
+      lv_bpc_sha1 = zcl_bpc_git_remote=>blob_sha1( is_bpc-content ).
+    ELSEIF iv_synced = abap_true
         AND is_bpc-lstmod_date = is_state-lstmod_date AND is_bpc-lstmod_time = is_state-lstmod_time.
       " Not touched in BPC since the last sync
       lv_bpc_sha1 = to_lower( is_state-blob_sha1 ).
@@ -728,6 +831,11 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
           ENDLOOP.
         ENDLOOP.
       ENDLOOP.
+
+      list_packages( EXPORTING iv_environment = iv_environment iv_model = lv_model
+                     CHANGING ct_workbooks = rt_workbooks ).
+      list_links( EXPORTING iv_environment = iv_environment iv_model = lv_model
+                  CHANGING ct_workbooks = rt_workbooks ).
     ENDLOOP.
   ENDMETHOD.
 
@@ -761,8 +869,347 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       ELSEIF lv_dm_folder = c_conversion_folder
           AND has_type( iv_types = c_conversion_types iv_type = lv_type ) = abap_true.
         rv_kind = c_kind-conversion.
+      ELSEIF lv_dm_folder = c_package_folder AND lv_type = c_xml_type AND lv_count = lv_area + 3.
+        rv_kind = c_kind-package.
+      ELSEIF lv_dm_folder = c_link_folder AND lv_type = c_xml_type AND lv_count = lv_area + 2
+          AND lv_area = 2.
+        " Package links belong to a model, never to a team
+        rv_kind = c_kind-link.
       ENDIF.
     ENDIF.
+  ENDMETHOD.
+
+  METHOD list_packages.
+    TYPES:
+      BEGIN OF ty_row,
+        guid         TYPE ujd_packages2-guid,
+        group_id     TYPE ujd_packages2-group_id,
+        package_id   TYPE ujd_packages2-package_id,
+        team_id      TYPE ujd_packages2-team_id,
+        package_type TYPE ujd_packages2-package_type,
+        user_group   TYPE ujd_packages2-user_group,
+        chain_id     TYPE ujd_packages2-chain_id,
+      END OF ty_row.
+    DATA lt_rows TYPE STANDARD TABLE OF ty_row WITH DEFAULT KEY.
+    DATA lv_script TYPE string.
+    DATA lv_offset TYPE i.
+    DATA lv_next TYPE i.
+
+    " Rows without a package ID are package groups
+    SELECT guid, group_id, package_id, team_id, package_type, user_group, chain_id
+      FROM ujd_packages2
+      WHERE appset_id = @iv_environment AND app_id = @iv_model AND package_id <> @space
+      INTO TABLE @lt_rows.
+    LOOP AT lt_rows INTO DATA(ls_row).
+      DATA(ls_package) = VALUE ty_package( group = ls_row-group_id id = ls_row-package_id
+                                           team = ls_row-team_id type = ls_row-package_type
+                                           user_group = ls_row-user_group chain = ls_row-chain_id ).
+      " Description in the logon language, else in any
+      SELECT SINGLE package_desc FROM ujd_packagest2
+        WHERE guid = @ls_row-guid AND langu = @sy-langu
+        INTO @ls_package-descr.
+      IF sy-subrc <> 0.
+        SELECT SINGLE package_desc FROM ujd_packagest2
+          WHERE guid = @ls_row-guid
+          INTO @ls_package-descr.
+      ENDIF.
+      " Without a row the package runs its process chain's default script
+      CLEAR lv_script.
+      SELECT SINGLE content FROM ujd_instruction2
+        WHERE guid = @ls_row-guid
+        INTO @lv_script.
+      IF sy-subrc = 0.
+        ls_package-has_script = abap_true.
+        " Consume separators explicitly: the final <BR> terminates the last
+        " step; earlier adjacent separators represent intentional empty steps.
+        WHILE lv_script IS NOT INITIAL.
+          FIND FIRST OCCURRENCE OF c_script_separator IN lv_script MATCH OFFSET lv_offset.
+          IF sy-subrc <> 0.
+            APPEND lv_script TO ls_package-script.
+            EXIT.
+          ENDIF.
+          APPEND substring( val = lv_script len = lv_offset ) TO ls_package-script.
+          lv_next = lv_offset + strlen( c_script_separator ).
+          lv_script = substring( val = lv_script off = lv_next ).
+        ENDWHILE.
+      ENDIF.
+
+      DATA(lv_base) = COND string( WHEN ls_row-team_id IS INITIAL THEN |{ iv_model }/|
+                                   ELSE |{ iv_model }/{ c_team_folder }/{ to_file_name( ls_row-team_id ) }/| ).
+      DATA(lv_path) = |{ lv_base }{ c_dm_folder }/{ c_package_folder }/{ to_file_name( ls_row-group_id ) }/| &&
+                      |{ to_file_name( ls_row-package_id ) }.xml|.
+      DATA(lv_content) = package_to_xml( ls_package ).
+      INSERT VALUE #( path      = lv_path
+                      kind      = c_kind-package
+                      model     = iv_model
+                      docname   = to_docname( iv_environment = iv_environment iv_path = lv_path )
+                      generated = abap_true
+                      content   = lv_content
+                      size      = xstrlen( lv_content ) ) INTO TABLE ct_workbooks.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD list_links.
+    DATA lv_content TYPE string.
+    SELECT link_id, service_link_id FROM ujd_package_link
+      WHERE appset_id = @iv_environment AND app_id = @iv_model
+      INTO TABLE @DATA(lt_links).
+    LOOP AT lt_links INTO DATA(ls_link).
+      " The definition is stored under the service link ID if there is one
+      DATA(lv_id) = COND uj_dms_id( WHEN ls_link-service_link_id IS NOT INITIAL
+                                    THEN ls_link-service_link_id ELSE ls_link-link_id ).
+      CLEAR lv_content.
+      SELECT SINGLE content FROM ujd_link
+        WHERE link_id = @lv_id
+        INTO @lv_content.
+      DATA(lv_name) = get_link_name( lv_content ).
+      IF lv_name IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      DATA(lv_path) = |{ iv_model }/{ c_dm_folder }/{ c_link_folder }/{ to_file_name( lv_name ) }.xml|.
+      " The ID differs per system, so Git holds the link without it
+      DATA(lv_file) = cl_abap_codepage=>convert_to( set_link_id( iv_xml = lv_content iv_id = `` ) ).
+      INSERT VALUE #( path      = lv_path
+                      kind      = c_kind-link
+                      model     = iv_model
+                      docname   = to_docname( iv_environment = iv_environment iv_path = lv_path )
+                      generated = abap_true
+                      content   = lv_file
+                      size      = xstrlen( lv_file ) ) INTO TABLE ct_workbooks.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD package_to_xml.
+    DATA(lv_nl) = cl_abap_char_utilities=>newline.
+    DATA(lv_xml) = |<?xml version="1.0" encoding="utf-8"?>{ lv_nl }<package>{ lv_nl }| &&
+      xml_element( iv_name = `group` iv_value = is_package-group ) &&
+      xml_element( iv_name = `id` iv_value = is_package-id ) &&
+      xml_element( iv_name = `team` iv_value = is_package-team ) &&
+      xml_element( iv_name = `description` iv_value = is_package-descr ) &&
+      xml_element( iv_name = `type` iv_value = is_package-type ) &&
+      xml_element( iv_name = `userGroup` iv_value = |{ CONV i( is_package-user_group ) }| ) &&
+      xml_element( iv_name = `chain` iv_value = is_package-chain ).
+    IF is_package-has_script = abap_true.
+      lv_xml = lv_xml && |  <script>{ lv_nl }|.
+      LOOP AT is_package-script INTO DATA(lv_line).
+        lv_xml = lv_xml && `  ` && xml_element( iv_name = `line` iv_value = lv_line ).
+      ENDLOOP.
+      lv_xml = lv_xml && |  </script>{ lv_nl }|.
+    ENDIF.
+    lv_xml = lv_xml && |</package>{ lv_nl }|.
+    rv_xml = cl_abap_codepage=>convert_to( lv_xml ).
+  ENDMETHOD.
+
+  METHOD xml_element.
+    DATA(lv_value) = |{ iv_value }|.
+    rv_xml = |  <{ iv_name }>{ escape( val = lv_value format = cl_abap_format=>e_xml_text ) }</{ iv_name }>| &&
+             cl_abap_char_utilities=>newline.
+  ENDMETHOD.
+
+  METHOD parse_package.
+    DATA lv_element TYPE string.
+    DATA lv_root TYPE string.
+    CLEAR: es_package, ev_error.
+    TRY.
+        DATA(lo_reader) = cl_sxml_string_reader=>create( iv_xml ).
+        DO.
+          DATA(lo_node) = lo_reader->read_next_node( ).
+          IF lo_node IS NOT BOUND.
+            EXIT.
+          ENDIF.
+          CASE lo_node->type.
+            WHEN if_sxml_node=>co_nt_element_open.
+              lv_element = CAST if_sxml_open_element( lo_node )->qname-name.
+              IF lv_root IS INITIAL.
+                lv_root = lv_element.
+                IF lv_root <> `package`.
+                  ev_error = 'The package file must have a package root element'.
+                  RETURN.
+                ENDIF.
+              ENDIF.
+              IF lv_element = `script`.
+                es_package-has_script = abap_true.
+              ELSEIF lv_element = `line`.
+                " An empty <line/> has no value node
+                APPEND INITIAL LINE TO es_package-script.
+              ENDIF.
+            WHEN if_sxml_node=>co_nt_element_close.
+              CLEAR lv_element.
+            WHEN if_sxml_node=>co_nt_value.
+              DATA(lv_value) = CAST if_sxml_value_node( lo_node )->get_value( ).
+              CASE lv_element.
+                WHEN `group`.
+                  es_package-group = lv_value.
+                WHEN `id`.
+                  es_package-id = lv_value.
+                WHEN `team`.
+                  es_package-team = lv_value.
+                WHEN `description`.
+                  es_package-descr = lv_value.
+                WHEN `type`.
+                  es_package-type = lv_value.
+                WHEN `userGroup`.
+                  es_package-user_group = lv_value.
+                WHEN `chain`.
+                  es_package-chain = lv_value.
+                WHEN `line`.
+                  es_package-script[ lines( es_package-script ) ] = lv_value.
+              ENDCASE.
+          ENDCASE.
+        ENDDO.
+      CATCH cx_root INTO DATA(lx_error).
+        ev_error = |Not a valid package file: { lx_error->get_text( ) }|.
+        RETURN.
+    ENDTRY.
+    IF es_package-group IS INITIAL OR es_package-id IS INITIAL.
+      ev_error = 'The package file has no group or id'.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD get_link_name.
+    FIND FIRST OCCURRENCE OF REGEX '<PROPERTY NAME="NAME">([^<]*)</PROPERTY>' IN iv_xml SUBMATCHES rv_name.
+    REPLACE ALL OCCURRENCES OF '&lt;' IN rv_name WITH '<'.
+    REPLACE ALL OCCURRENCES OF '&gt;' IN rv_name WITH '>'.
+    REPLACE ALL OCCURRENCES OF '&quot;' IN rv_name WITH '"'.
+    REPLACE ALL OCCURRENCES OF '&apos;' IN rv_name WITH ''''.
+    REPLACE ALL OCCURRENCES OF '&amp;' IN rv_name WITH '&'.
+  ENDMETHOD.
+
+  METHOD set_link_id.
+    " The link's own ID is its first ID property; the steps' IDs follow it
+    rv_xml = iv_xml.
+    REPLACE FIRST OCCURRENCE OF REGEX '<PROPERTY NAME="ID">[^<]*</PROPERTY>|<PROPERTY NAME="ID"\s*/>'
+      IN rv_xml WITH |<PROPERTY NAME="ID">{ iv_id }</PROPERTY>|.
+  ENDMETHOD.
+
+  METHOD to_file_name.
+    rv_name = iv_name.
+    REPLACE ALL OCCURRENCES OF REGEX '[/\\:*?"<>|]' IN rv_name WITH '_'.
+  ENDMETHOD.
+
+  METHOD restore_package.
+    DATA ls_package TYPE ty_package.
+    parse_package( EXPORTING iv_xml = iv_xml IMPORTING es_package = ls_package ev_error = rv_message ).
+    IF rv_message IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+    DATA(lv_base) = COND string( WHEN ls_package-team IS INITIAL THEN |{ iv_model }/|
+      ELSE |{ iv_model }/{ c_team_folder }/{ to_file_name( ls_package-team ) }/| ).
+    DATA(lv_expected) = |{ lv_base }{ c_dm_folder }/{ c_package_folder }/{ to_file_name( ls_package-group ) }/| &&
+      |{ to_file_name( ls_package-id ) }.xml|.
+    IF iv_path <> lv_expected.
+      rv_message = 'The package identity does not match the selected Git path'.
+      RETURN.
+    ENDIF.
+    DATA(lv_model) = CONV uj_appl_id( iv_model ).
+    IF iv_delete = abap_false AND ls_package-has_script = abap_false.
+      SELECT SINGLE guid FROM ujd_packages2
+        WHERE appset_id = @iv_environment AND app_id = @lv_model AND team_id = @ls_package-team
+          AND group_id = @ls_package-group AND package_id = @ls_package-id
+        INTO @DATA(lv_guid).
+      IF sy-subrc = 0.
+        SELECT SINGLE guid FROM ujd_instruction2 WHERE guid = @lv_guid INTO @DATA(lv_instruction).
+        IF sy-subrc = 0.
+          rv_message = 'Cannot restore a default-script package over a custom script; reset it in BPC first'.
+          RETURN.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+    TRY.
+        DATA(lo_package) = NEW cl_ujd_package( ).
+        IF iv_delete = abap_true.
+          lo_package->delete_package( i_appset = iv_environment i_appl = lv_model i_team = ls_package-team
+                                      i_group = ls_package-group i_package = ls_package-id ).
+          RETURN.
+        ENDIF.
+        IF lo_package->check_package_exist( i_appset = iv_environment i_appl = lv_model
+                                            i_team = ls_package-team i_group = ls_package-group
+                                            i_package = ls_package-id ) = abap_true.
+          lo_package->modify_package( i_appset = iv_environment i_appl = lv_model i_team = ls_package-team
+                                      i_group = ls_package-group i_package = ls_package-id
+                                      i_package_desc = ls_package-descr i_package_type = ls_package-type
+                                      i_user_group = ls_package-user_group i_chain = ls_package-chain
+                                      i_original_group = ls_package-group
+                                      i_original_package = ls_package-id ).
+        ELSE.
+          lo_package->add_package( i_appset = iv_environment i_appl = lv_model i_team = ls_package-team
+                                   i_group = ls_package-group i_package = ls_package-id
+                                   i_package_desc = ls_package-descr i_package_type = ls_package-type
+                                   i_user_group = ls_package-user_group i_chain = ls_package-chain ).
+        ENDIF.
+        " Without a script element the package keeps its chain's default script
+        IF ls_package-has_script = abap_true.
+          DATA(lv_script) = COND string( WHEN ls_package-script IS NOT INITIAL
+            THEN concat_lines_of( table = ls_package-script sep = c_script_separator ) && c_script_separator ).
+          lo_package->save_package_info( i_appset = iv_environment i_appl = lv_model i_team = ls_package-team
+                                         i_group = ls_package-group i_package = ls_package-id
+                                         i_script = lv_script ).
+        ENDIF.
+      CATCH cx_static_check INTO DATA(lx_error).
+        rv_message = lx_error->get_text( ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD restore_link.
+    DATA lo_link TYPE REF TO cl_ujd_link.
+    DATA lv_plink_id TYPE uj_dms_id.
+    DATA lv_success TYPE uj_flg.
+    DATA lt_messages TYPE uj0_t_message.
+
+    DATA(lv_xml) = cl_abap_codepage=>convert_from( iv_xml ).
+    DATA(lv_name) = get_link_name( lv_xml ).
+    IF lv_name IS INITIAL.
+      rv_message = 'The package link file has no NAME property'.
+      RETURN.
+    ENDIF.
+    DATA(lv_expected) = |{ iv_model }/{ c_dm_folder }/{ c_link_folder }/{ to_file_name( lv_name ) }.xml|.
+    IF iv_path <> lv_expected.
+      rv_message = 'The package link name does not match the selected Git path'.
+      RETURN.
+    ENDIF.
+    DATA(lv_model) = CONV uj_appl_id( iv_model ).
+    DATA(ls_user) = VALUE uj0_s_user( user_id = sy-uname langu = sy-langu ).
+    TRY.
+        " SAVE_PLINK would add a second link of the same name; update in place
+        cl_ujd_package_link=>get_link_with_name( EXPORTING i_appset_id = iv_environment
+                                                           i_appl_id = lv_model
+                                                           i_link_name = CONV uj_fullname( lv_name )
+                                                 IMPORTING eo_link = lo_link
+                                                           e_plink_id = lv_plink_id ).
+        DATA(lo_plink) = NEW cl_ujd_package_link( ).
+        IF iv_delete = abap_true.
+          IF lv_plink_id IS NOT INITIAL.
+            lo_plink->delete_plink( i_appset_id = iv_environment i_appl_id = lv_model i_link_id = lv_plink_id ).
+          ENDIF.
+          RETURN.
+        ENDIF.
+        IF lv_plink_id IS INITIAL.
+          lo_plink->save_plink( EXPORTING i_appset_id = iv_environment i_appl_id = lv_model
+                                          i_link_content = lv_xml is_user = ls_user
+                                IMPORTING e_link_id = lv_plink_id ef_success = lv_success
+                                          et_message = lt_messages ).
+        ELSE.
+          lv_success = abap_true.
+        ENDIF.
+        IF lv_success = abap_true.
+          " Store the link with this system's ID, as BPC does
+          lo_plink->update_plink( EXPORTING i_appset_id = iv_environment i_appl_id = lv_model
+                                            is_user = ls_user i_link_id = lv_plink_id
+                                            i_link_detail = set_link_id( iv_xml = lv_xml iv_id = lv_plink_id )
+                                  IMPORTING ef_success = lv_success et_message = lt_messages ).
+        ENDIF.
+        IF lv_success = abap_false.
+          LOOP AT lt_messages INTO DATA(ls_message) WHERE msgty CA 'EAX'.
+            rv_message = ls_message-message.
+            EXIT.
+          ENDLOOP.
+          IF rv_message IS INITIAL.
+            rv_message = 'BPC did not accept the package link'.
+          ENDIF.
+        ENDIF.
+      CATCH cx_static_check INTO DATA(lx_error).
+        rv_message = lx_error->get_text( ).
+    ENDTRY.
   ENDMETHOD.
 
   METHOD has_type.

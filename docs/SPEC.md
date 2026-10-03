@@ -3,7 +3,8 @@
 ## 1. Goal
 
 bpcGit is a web app on the BPC system that puts BPC content under Git version
-control in a GitHub repository. The first release covers **EPM workbooks only**.
+control in a GitHub repository. It tracks EPM workbooks, logic scripts,
+transformation and conversion files, Data Manager packages and package links.
 
 A user opens the app, connects it to a GitHub repository, picks the BPC
 environment to track, and then commits workbooks to Git or restores them from Git.
@@ -15,15 +16,15 @@ environment to track, and then commits workbooks to Git or restores them from Gi
 - Set up a GitHub repository connection: URL and branch. The Git login is
   asked only when the Git host needs it, as in abapGit (section 7.2).
 - Bind that connection to one BPC environment (AppSet).
-- List the environment's EPM workbooks and show each one's Git status.
+- List the environment's tracked content and show each one's Git status.
 - Commit selected workbooks to GitHub with a commit message.
 - Restore (pull) selected workbooks from GitHub back into BPC.
 - Show the commit history of a workbook.
 
 ### Out of scope (v1)
 
-- Data Manager packages and data files,
-  dimensions, BPF templates and the rest of the BPC content.
+- Data Manager data files, dimensions, BPF templates and other BPC content
+  not listed in section 3.
 - Private publications (`PRIVATEPUBLICATIONS\<user>\`) and temporary files.
 - Branch management, merging and conflict resolution inside the app. These
   are done on GitHub.
@@ -101,6 +102,35 @@ Added on 2026-10-03, following bpcIO (`c_dm_folder`, `c_transformation_folder`,
   tracked: Git paths are recognised by their extension.
 - One rule decides what is tracked, for BPC and Git alike:
   `ZCL_BPC_GIT_SERVICE->GET_KIND` (path to kind).
+
+### 3.4 Data Manager packages and package links
+
+Packages and links are table entries rather than BPC documents. They are
+represented by generated UTF-8 XML files and use the same overview, status,
+commit and restore flows. Their last-change fields are empty; generated
+content is hashed on each comparison because the tables have no timestamps.
+
+- Packages: `<MODEL>/DATAMANAGER/PACKAGES/<GROUP>/<PACKAGE>.xml`, also below
+  `<MODEL>/TEAM FILES/<TEAM>/` for team packages. Package-group rows are ignored.
+  XML records group, id, team, description, type, userGroup and process chain.
+  A custom script is stored as one `<line>` per step in `<script>`; BPC's literal
+  `<BR>` separators are rebuilt on restore. A final separator terminates the
+  last step; adjacent earlier separators preserve intentional empty steps.
+  Without `<script>` the package uses
+  its process chain's default script. Restoring this over an existing custom
+  script is refused before changing data: BPC's save API cannot remove the
+  instruction row. Reset the package to its default script in BPC first.
+- Links: `<MODEL>/DATAMANAGER/PACKAGELINKS/<NAME>.xml`, at company level only.
+  BPC's link XML is preserved, with its first ID property blanked for Git.
+  Restore updates an existing link by name, preserving its target-system ID
+  and references; a new link receives a new ID. Deleting a scheduled link is
+  refused by BPC.
+- Path segments replace `/ \ : * ? " < > |` with `_`. Identity is carried in
+  the XML; paths must match that identity when restoring.
+- Restore uses BPC's package and package-link APIs. Each file commits its data
+  and sync record together; a failed file rolls back before the next file.
+- Duplicate names or names that sanitize to the same Git path are unsupported;
+  only one object can occupy a tracked path. Resolve these names before use.
 
 ## 4. User flows
 
@@ -255,8 +285,8 @@ restored with F5.
 - BPC content is read and hashed only when needed: when the workbook is also
   in Git and its BPC timestamp differs from the sync record (or there is no
   record). An empty repository therefore costs no content reads.
-- Files in Git count as workbooks only below `<MODEL>/EEXCEL/` with a workbook
-  extension; anything else (README.md, .bpcgit.json) is ignored.
+- Files in Git are recognized by the shared `GET_KIND` rules in section 3;
+  unrelated files (README.md, .bpcgit.json) are ignored.
 - Modified in BPC: the BPC `LSTMOD_DATE`/`LSTMOD_TIME` has changed **and** the
   Git blob SHA-1 of the current content differs. The SHA comes from
   `ZCL_ABAPGIT_HASH`.
