@@ -16,6 +16,7 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
         workbooks    TYPE string VALUE '/workbooks',
         commit       TYPE string VALUE '/commit',
         restore      TYPE string VALUE '/restore',
+        history      TYPE string VALUE '/history',
       END OF c_resource.
     "! Longest Git user name and access token accepted.
     CONSTANTS c_max_user TYPE i VALUE 255 ##NO_TEXT.
@@ -73,6 +74,11 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS handle_restore
       IMPORTING io_service TYPE REF TO zcl_bpc_git_service
       RAISING cx_uj_static_check.
+    METHODS handle_history
+      IMPORTING io_service TYPE REF TO zcl_bpc_git_service
+      RAISING cx_uj_static_check.
+    METHODS read_history_depth
+      RETURNING VALUE(rv_depth) TYPE i.
     "! Reads the paths field: one repository path per line. Answers 400 and
     "! returns nothing if there are none or too many.
     METHODS read_paths
@@ -146,6 +152,10 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
           WHEN c_resource-commit.
             IF require_method( c_method-post ).
               handle_commit( lo_service ).
+            ENDIF.
+          WHEN c_resource-history.
+            IF require_method( c_method-post ).
+              handle_history( lo_service ).
             ENDIF.
           WHEN c_resource-restore.
             IF require_method( c_method-post ).
@@ -365,6 +375,13 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
 
     DATA(lv_expected) = read_field( iv_name = 'commit' iv_label = 'current commit'
                                     iv_max_length = 40 iv_required = abap_false ).
+    DATA(lv_version) = to_lower( read_field( iv_name = 'version' iv_label = 'history commit'
+      iv_max_length = 40 iv_required = abap_false ) ).
+    DATA(lv_depth) = read_history_depth( ).
+    IF lv_version IS NOT INITIAL AND ( strlen( lv_version ) <> 40 OR lv_version CN '0123456789abcdef' ).
+      mv_invalid = abap_true.
+      respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'Invalid history commit' ).
+    ENDIF.
     IF mv_invalid = abap_true.
       RETURN.
     ENDIF.
@@ -384,6 +401,8 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
                                              io_remote = lo_remote
                                              it_paths = lt_paths
                                              iv_expected_commit = lv_expected
+                                             iv_version = lv_version
+                                             iv_depth = lv_depth
                                    IMPORTING ev_error = lv_error
                                              et_results = lt_results ).
       CATCH zcx_abapgit_exception INTO DATA(lx_git).
@@ -405,6 +424,65 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       lv_separator = ','.
     ENDLOOP.
     respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"results":[` && lv_json && `]}` ).
+  ENDMETHOD.
+
+  METHOD read_history_depth.
+    rv_depth = 100.
+    DATA(lv_depth) = read_field( iv_name = 'depth' iv_label = 'history range'
+      iv_max_length = 4 iv_required = abap_false ).
+    IF lv_depth IS INITIAL.
+      RETURN.
+    ENDIF.
+    IF lv_depth CN '0123456789'.
+      mv_invalid = abap_true.
+    ELSE.
+      rv_depth = CONV i( lv_depth ).
+      IF rv_depth < 1 OR rv_depth > 1000.
+        mv_invalid = abap_true.
+      ENDIF.
+    ENDIF.
+    IF mv_invalid = abap_true.
+      respond_error( iv_code = 400 iv_reason = 'Bad Request'
+        iv_message = 'History range must be between 1 and 1000 commits' ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD handle_history.
+    DATA lv_environment TYPE uj_appset_id.
+    DATA ls_config TYPE zbpc_git_repo.
+    DATA lo_remote TYPE REF TO zcl_bpc_git_remote.
+    DATA lv_with_login TYPE abap_bool.
+    DATA(lv_path) = read_field( iv_name = 'path' iv_label = 'file path' iv_max_length = 255 ).
+    DATA(lv_depth) = read_history_depth( ).
+    IF mv_invalid = abap_true.
+      RETURN.
+    ENDIF.
+    TRY.
+        create_remote( EXPORTING io_service = io_service
+          IMPORTING ev_environment = lv_environment es_config = ls_config
+                    eo_remote = lo_remote ev_with_login = lv_with_login ).
+        IF lo_remote IS NOT BOUND.
+          RETURN.
+        ENDIF.
+        DATA(ls_history) = io_service->get_history( iv_environment = lv_environment
+          io_remote = lo_remote iv_path = lv_path iv_depth = lv_depth ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_git).
+        respond_git_error( ix_error = lx_git iv_with_login = lv_with_login ).
+        RETURN.
+    ENDTRY.
+    DATA lv_json TYPE string.
+    DATA lv_separator TYPE string.
+    LOOP AT ls_history-versions INTO DATA(ls_version).
+      lv_json = lv_json && lv_separator && `{"commit":` && quote( ls_version-commit ) &&
+        `,"author":` && quote( ls_version-author ) && `,"date":` && quote( ls_version-date ) &&
+        `,"message":` && quote( ls_version-message ) &&
+        `,"present":` && COND string( WHEN ls_version-present = abap_true THEN `true` ELSE `false` ) &&
+        `,"complete":` && COND string( WHEN ls_version-complete = abap_true THEN `true` ELSE `false` ) && `}`.
+      lv_separator = ','.
+    ENDLOOP.
+    respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"head":` && quote( ls_history-head ) &&
+      `,"truncated":` && COND string( WHEN ls_history-truncated = abap_true THEN `true` ELSE `false` ) &&
+      `,"versions":[` && lv_json && `]}` ).
   ENDMETHOD.
 
   METHOD read_paths.

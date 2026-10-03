@@ -28,7 +28,8 @@ Base path: `/sap/bc/zbpc_git` (handler `ZCL_BPC_GIT_HTTP`)
 | POST | `/connection` | Test the connection (`environment`; optional `user`, `token`) |
 | POST | `/workbooks` | Tracked files in BPC and Git with their status (`environment`; optional `user`, `token`) |
 | POST | `/commit` | Commit selected files (`environment`, `message`, `commit` = head seen, `paths` one per line; `user`, `token`) |
-| POST | `/restore` | Write the Git version into BPC (`environment`, `commit` = head seen, `paths` one per line; `user`, `token`) |
+| POST | `/restore` | Write a Git version into BPC (`environment`, `commit` = head seen, `paths`; optional `version`, `depth`, `user`, `token`) |
+| POST | `/history` | Changes to one item (`environment`, `path`; optional `depth`, `user`, `token`) |
 
 Git login works as in abapGit: requests go without credentials first. When the
 Git host wants a login, the API answers 403 with `"authRequired": true` and the
@@ -49,7 +50,7 @@ a form on another website cannot change data with the user's session.
 6. Commit selected files (staging) (done)
 7. Restore selected files from Git (implemented; latest discard-change cases
    await acceptance testing)
-8. History (not implemented)
+8. File history and restore of an older version (implemented; SAP acceptance pending)
 
 ## Data Manager content
 
@@ -69,3 +70,8 @@ a package using its chain's default script. SAP/browser acceptance is pending.
 Transformation and conversion workbooks each appear once in the overview.
 Their status, commit, and restore include the paired definition automatically.
 A restore succeeds for the pair together; a failure rolls back the pair.
+
+Select one item and choose History to inspect its earlier versions. Load older
+history extends the recent branch range to at most 1,000 commits. Restoring an
+older version changes BPC and leaves it ready to commit; it does not move Git.
+Local UI regression checks: `node tests/history_ui.test.cjs`.

@@ -95,6 +95,11 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_individual TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rs_overview) TYPE ty_overview
       RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
+    METHODS get_history
+      IMPORTING iv_environment TYPE uj_appset_id io_remote TYPE REF TO zcl_bpc_git_remote
+                iv_path TYPE string iv_depth TYPE i DEFAULT 100
+      RETURNING VALUE(rs_history) TYPE zcl_bpc_git_remote=>ty_history
+      RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
     "! Commits the BPC version of the given workbooks in one commit (F4) and
     "! records them as synced. Refuses, with ev_error for the user, if the
     "! branch has moved past iv_expected_commit (the head the user saw) or a
@@ -120,6 +125,8 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 io_remote TYPE REF TO zcl_bpc_git_remote
                 it_paths TYPE string_table
                 iv_expected_commit TYPE string
+                iv_version TYPE string OPTIONAL
+                iv_depth TYPE i DEFAULT 100
       EXPORTING ev_error TYPE string
                 et_results TYPE ty_restore_results
       RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
@@ -234,6 +241,9 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     "!   <model>/DATAMANAGER/TRANSFORMATIONFILES/.../<name>.TDM|XLS  transformation
     "!   <model>/DATAMANAGER/CONVERSIONFILES/.../<name>.CDM|XLS      conversion
     "! and the same below <model>/TEAM FILES/<team>/ instead of <model>/.
+    METHODS history_paths
+      IMPORTING iv_path TYPE string
+      RETURNING VALUE(rt_paths) TYPE string_table.
     METHODS logical_path
       IMPORTING iv_path TYPE string it_files TYPE ty_workbooks
       RETURNING VALUE(rv_path) TYPE string.
@@ -471,6 +481,26 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+  METHOD history_paths.
+    APPEND iv_path TO rt_paths.
+    DATA(lv_kind) = get_kind( iv_path ).
+    DATA(lv_ext) = to_upper( substring_after( val = iv_path sub = '.' occ = -1 ) ).
+    IF ( lv_kind = c_kind-transformation OR lv_kind = c_kind-conversion )
+        AND ( lv_ext = 'XLS' OR lv_ext = 'XLSX' ).
+      DATA(lv_stem) = substring_before( val = iv_path sub = '.' occ = -1 ).
+      APPEND lv_stem && COND string( WHEN lv_kind = c_kind-transformation THEN '.TDM' ELSE '.CDM' ) TO rt_paths.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD get_history.
+    DATA(ls_config) = get_config( iv_environment ).
+    DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote ).
+    IF NOT line_exists( ls_overview-workbooks[ path = iv_path ] ).
+      zcx_abapgit_exception=>raise( 'The selected item is no longer listed; reload the overview' ).
+    ENDIF.
+    rs_history = io_remote->history( iv_branch = ls_config-branch it_paths = history_paths( iv_path ) iv_depth = iv_depth ).
+  ENDMETHOD.
+
   METHOD commit_workbooks.
     DATA lt_changes TYPE zcl_bpc_git_remote=>ty_changes.
     DATA lt_synced TYPE STANDARD TABLE OF zbpc_git_state WITH DEFAULT KEY.
@@ -574,6 +604,62 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       RETURN.
     ENDIF.
 
+    DATA(lt_head_files) = ls_overview-workbooks.
+    IF iv_version IS NOT INITIAL.
+      IF lines( it_paths ) <> 1.
+        ev_error = 'Select one item to restore from history'.
+        RETURN.
+      ENDIF.
+      DATA(lv_history_path) = logical_path( iv_path = it_paths[ 1 ] it_files = ls_overview-workbooks ).
+      DATA(lt_current_groups) = group_files( ls_overview-workbooks ).
+      IF NOT line_exists( lt_current_groups[ path = lv_history_path ] ).
+        ev_error = 'The selected item is no longer listed; reload the overview'.
+        RETURN.
+      ENDIF.
+      DATA(lt_history_paths) = history_paths( lv_history_path ).
+      DATA(ls_history) = io_remote->history( iv_branch = ls_config-branch it_paths = lt_history_paths iv_depth = iv_depth ).
+      IF ls_history-head <> ls_overview-commit.
+        ev_error = 'The branch changed; reload history before restoring'.
+        RETURN.
+      ENDIF.
+      READ TABLE ls_history-versions INTO DATA(ls_version) WITH KEY commit = iv_version.
+      IF sy-subrc <> 0 OR ls_version-complete = abap_false.
+        ev_error = 'This version is unavailable or lacks a companion workbook/definition; choose a complete version'.
+        RETURN.
+      ENDIF.
+      DATA(ls_snapshot) = io_remote->read_version( iv_version ).
+      DATA lt_snapshot_files TYPE ty_workbooks.
+      DATA lv_operations TYPE i.
+      LOOP AT lt_history_paths INTO DATA(lv_snapshot_path).
+        READ TABLE ls_overview-workbooks INTO DATA(ls_snapshot_file) WITH KEY path = lv_snapshot_path.
+        IF sy-subrc <> 0.
+          ls_snapshot_file = VALUE #( path = lv_snapshot_path kind = get_kind( lv_snapshot_path )
+            model = get_model( lv_snapshot_path ) team = get_team( lv_snapshot_path )
+            docname = to_docname( iv_environment = iv_environment iv_path = lv_snapshot_path ) ).
+        ENDIF.
+        READ TABLE ls_snapshot-files INTO DATA(ls_snapshot_git) WITH KEY path = lv_snapshot_path.
+        IF sy-subrc = 0.
+          ls_snapshot_file-git_sha1 = ls_snapshot_git-sha1.
+          ls_snapshot_file-status = COND #( WHEN ls_snapshot_file-in_bpc = abap_true
+            THEN c_status-modified_git ELSE c_status-new_git ).
+        ELSEIF ls_snapshot_file-in_bpc = abap_true.
+          CLEAR ls_snapshot_file-git_sha1.
+          ls_snapshot_file-status = c_status-deleted_git.
+        ELSE.
+          ls_snapshot_file-status = c_status-unchanged.
+        ENDIF.
+        IF ls_snapshot_file-status <> c_status-unchanged.
+          lv_operations = lv_operations + 1.
+        ENDIF.
+        APPEND ls_snapshot_file TO lt_snapshot_files.
+      ENDLOOP.
+      ls_overview-workbooks = lt_snapshot_files.
+      IF lv_operations = 0.
+        APPEND VALUE #( path = lv_history_path ok = abap_true ) TO et_results.
+        RETURN.
+      ENDIF.
+    ENDIF.
+
     DATA lt_paths TYPE string_table.
     expand_selection( EXPORTING it_paths = it_paths it_files = ls_overview-workbooks iv_restore = abap_true
                        IMPORTING et_paths = lt_paths ev_error = ev_error ).
@@ -626,12 +712,13 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
                 lv_message = |{ lv_member }: { lv_message }|.
                 EXIT.
               ENDIF.
-              IF ls_file-status = c_status-deleted_git.
+              IF ls_file-status = c_status-deleted_git AND iv_version IS INITIAL.
                 DELETE FROM zbpc_git_state WHERE appset = @iv_environment AND docname = @ls_file-docname.
               ELSE.
                 DATA ls_attributes TYPE ujf_doc.
                 CLEAR ls_attributes.
-                IF ls_file-generated = abap_false AND ls_file-kind <> c_kind-package AND ls_file-kind <> c_kind-link.
+                IF ls_file-status <> c_status-deleted_git AND ls_file-generated = abap_false
+                    AND ls_file-kind <> c_kind-package AND ls_file-kind <> c_kind-link.
                   IF ls_file-kind = c_kind-transformation OR ls_file-kind = c_kind-conversion.
                     DATA lv_actual TYPE xstring.
                     lo_files->get_document( EXPORTING i_docname = ls_file-docname i_retzip = abap_false
@@ -648,7 +735,20 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
                   blob_sha1 = ls_file-git_sha1 commit_sha1 = ls_overview-commit
                   lstmod_date = ls_attributes-lstmod_date lstmod_time = ls_attributes-lstmod_time synced_by = sy-uname ).
                 GET TIME STAMP FIELD ls_state-synced_at.
-                MODIFY zbpc_git_state FROM ls_state.
+                IF iv_version IS NOT INITIAL.
+                  " History restore changes BPC relative to the current Git head.
+                  " Do not mark the older snapshot as synchronized with that head.
+                  DATA ls_head_file TYPE ty_workbook.
+                  CLEAR ls_head_file.
+                  READ TABLE lt_head_files INTO ls_head_file WITH KEY path = ls_file-path.
+                  ls_state-blob_sha1 = ls_head_file-git_sha1.
+                  CLEAR: ls_state-lstmod_date, ls_state-lstmod_time.
+                ENDIF.
+                IF ls_state-blob_sha1 IS INITIAL.
+                  DELETE FROM zbpc_git_state WHERE appset = @iv_environment AND docname = @ls_file-docname.
+                ELSE.
+                  MODIFY zbpc_git_state FROM ls_state.
+                ENDIF.
               ENDIF.
             ENDLOOP.
           ENDIF.

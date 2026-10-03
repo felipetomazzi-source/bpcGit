@@ -259,11 +259,37 @@ The screen has filters by status and model, plus a search box.
 
 ### F6. History
 
-For a selected workbook, the app lists its commits (SHA, author, date and
-message). It gets them by fetching the branch with a deeper history through
-abapGit's `UPLOAD_PACK_BY_BRANCH` (with `iv_deepen_level`), then decoding the
-commits and keeping those where the file's blob changed. Each commit can be
-restored with F5.
+Select one item, including an Unchanged item, and choose **History**. The
+list shows commits that changed its content, with author, UTC date, message
+and commit SHA. Transformation and conversion history considers both the
+workbook and its definition. Incomplete historical pairs are shown but cannot
+be restored. Deletion commits are shown and warn that restoring that snapshot
+deletes the item in BPC.
+
+History follows the configured branch's first-parent chain (merge commits show
+the changes introduced into that branch). It fetches the latest 100 branch
+commits initially; **Load older history** increases the range by 100 up to
+1,000. The UI says when older history remains or the limit has been reached.
+File renames are treated as separate paths. The shallow boundary is not shown
+as a file change unless its parent was fetched and compared, or it is the
+repository's actual root commit.
+
+Choose a complete version and **Restore selected version**, then confirm.
+The backend verifies that the version belongs to the displayed history and
+that the branch head still matches the head seen when history was loaded.
+It reads the selected commit through abapGit and uses the same lock checks,
+script validation, package/link guards and transaction behavior as normal
+restore. Paired files use one historical snapshot and roll back together.
+Restoring an older version changes BPC; it does not change Git. Sync state
+keeps the current Git head as the comparison baseline, so older restored
+content appears as Modified in BPC (or New/Deleted in BPC) and can be committed.
+Restoring the current version leaves matching content Unchanged.
+
+API: `POST /history` accepts environment, path, optional depth, user and token.
+`POST /restore` accepts optional version (historical commit) and depth as well
+as the existing commit (expected current head) and paths. History restore is
+limited to one logical item per request. All POST guards and Git login rules
+apply. Git calls remain in `ZCL_BPC_GIT_REMOTE`.
 
 ## 5. Repository layout
 
@@ -309,7 +335,7 @@ The app follows the same architecture as bpcIO:
 |---|---|---|
 | UI | BSP app `ZBPC_GIT` | UI5 1.52, `/UI5/CL_UI5_BSP_APPLICATION` |
 | REST handler | `ZCL_BPC_GIT_HTTP` at `/sap/bc/zbpc_git/` | JSON in and out |
-| Service | `ZCL_BPC_GIT_SERVICE` | Orchestrates flows F1–F6 |
+| Service | `ZCL_BPC_GIT_SERVICE` | Orchestrates flows F1â€“F6 |
 | BPC file access | `ZCL_BPC_GIT_BPC_FILES` | Wraps `CL_UJF_FILE_SERVICE_MGR` (`FACTORY`, `LIST_DIRECTORY`, `GET_DOCUMENT`, `PUT_DOCUMENT`, `LOCK_DOCUMENT`/`UNLOCK_DOCUMENT`) |
 | Git client | `ZCL_BPC_GIT_REMOTE` | Thin wrapper over abapGit (section 7.1). It is the only class that calls abapGit |
 | Config table | `ZBPC_GIT_REPO` | Environment, URL, branch, last changed by/at |

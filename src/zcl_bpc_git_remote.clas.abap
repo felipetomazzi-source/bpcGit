@@ -42,6 +42,29 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
       END OF ty_change,
       ty_changes TYPE STANDARD TABLE OF ty_change WITH DEFAULT KEY.
 
+    TYPES:
+      BEGIN OF ty_version,
+        commit TYPE string,
+        author TYPE string,
+        date TYPE string,
+        message TYPE string,
+        present TYPE abap_bool,
+        complete TYPE abap_bool,
+      END OF ty_version,
+      ty_versions TYPE STANDARD TABLE OF ty_version WITH DEFAULT KEY,
+      BEGIN OF ty_history,
+        head TYPE string,
+        truncated TYPE abap_bool,
+        versions TYPE ty_versions,
+      END OF ty_history.
+    METHODS history
+      IMPORTING iv_branch TYPE csequence it_paths TYPE string_table iv_depth TYPE i DEFAULT 100
+      RETURNING VALUE(rs_history) TYPE ty_history
+      RAISING zcx_abapgit_exception.
+    METHODS read_version
+      IMPORTING iv_commit TYPE string
+      RETURNING VALUE(rs_content) TYPE ty_branch_content
+      RAISING zcx_abapgit_exception.
     "! Version of the installed abapGit developer version, initial if it is
     "! missing. Read dynamically so the caller can report a missing abapGit.
     CLASS-METHODS get_abapgit_version
@@ -106,6 +129,11 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
     DATA mt_pulled TYPE zif_abapgit_git_definitions=>ty_files_tt.
     "! Asks for the push advertisement (git-receive-pack), which the Git host
     "! only sends to users who may push.
+    METHODS tree_signature
+      IMPORTING it_objects TYPE zif_abapgit_definitions=>ty_objects_tt
+                iv_tree TYPE zif_abapgit_git_definitions=>ty_sha1 it_paths TYPE string_table
+      EXPORTING ev_signature TYPE string ev_present TYPE abap_bool ev_complete TYPE abap_bool
+      RAISING zcx_abapgit_exception.
     METHODS check_push_access
       RAISING zcx_abapgit_exception.
 ENDCLASS.
@@ -200,6 +228,127 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     mv_commit = ls_pull-commit.
     mt_files = rs_content-files.
     mt_objects = ls_pull-objects.
+    mt_pulled = ls_pull-files.
+  ENDMETHOD.
+
+  METHOD tree_signature.
+    CLEAR: ev_signature, ev_present, ev_complete.
+    DATA lv_count TYPE i.
+    LOOP AT it_paths INTO DATA(lv_path).
+      DATA(lv_tree) = iv_tree.
+      DATA lt_parts TYPE string_table.
+      SPLIT lv_path AT '/' INTO TABLE lt_parts.
+      DATA lv_blob TYPE string.
+      CLEAR lv_blob.
+      LOOP AT lt_parts INTO DATA(lv_part).
+        DATA(lv_index) = sy-tabix.
+        READ TABLE it_objects INTO DATA(ls_object) WITH KEY type COMPONENTS
+          type = zif_abapgit_git_definitions=>c_type-tree sha1 = lv_tree.
+        IF sy-subrc <> 0.
+          zcx_abapgit_exception=>raise( 'Incomplete Git history tree' ).
+        ENDIF.
+        DATA(lt_nodes) = zcl_abapgit_git_pack=>decode_tree( ls_object-data ).
+        READ TABLE lt_nodes INTO DATA(ls_node) WITH KEY name = lv_part.
+        IF sy-subrc <> 0.
+          CLEAR lv_blob.
+          EXIT.
+        ENDIF.
+        IF lv_index = lines( lt_parts ).
+          IF ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file
+              OR ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-executable.
+            lv_blob = to_lower( ls_node-sha1 ).
+          ENDIF.
+        ELSEIF ls_node-chmod <> zif_abapgit_git_definitions=>c_chmod-dir.
+          EXIT.
+        ENDIF.
+        lv_tree = ls_node-sha1.
+      ENDLOOP.
+      ev_signature = ev_signature && lv_path && ':' && lv_blob && ';'.
+      IF lv_blob IS NOT INITIAL.
+        lv_count = lv_count + 1.
+      ENDIF.
+    ENDLOOP.
+    ev_present = xsdbool( lv_count > 0 ).
+    ev_complete = xsdbool( lv_count = 0 OR lv_count = lines( it_paths ) ).
+  ENDMETHOD.
+
+  METHOD history.
+    IF iv_depth < 1 OR iv_depth > 1000.
+      zcx_abapgit_exception=>raise( 'History depth must be between 1 and 1000' ).
+    ENDIF.
+    DATA(ls_pull) = zcl_abapgit_git_porcelain=>pull_by_branch(
+      iv_url = mv_url iv_branch_name = c_heads && iv_branch iv_deepen_level = iv_depth + 1 ).
+    rs_history-head = to_lower( ls_pull-commit ).
+    DATA(lv_commit) = ls_pull-commit.
+    DATA lv_scanned TYPE i.
+    WHILE lv_commit IS NOT INITIAL AND lv_scanned < iv_depth.
+      READ TABLE ls_pull-objects INTO DATA(ls_object) WITH KEY type COMPONENTS
+        type = zif_abapgit_git_definitions=>c_type-commit sha1 = lv_commit.
+      IF sy-subrc <> 0.
+        rs_history-truncated = abap_true.
+        EXIT.
+      ENDIF.
+      DATA(ls_commit) = zcl_abapgit_git_pack=>decode_commit( ls_object-data ).
+      tree_signature( EXPORTING it_objects = ls_pull-objects iv_tree = ls_commit-tree it_paths = it_paths
+        IMPORTING ev_signature = DATA(lv_current) ev_present = DATA(lv_present) ev_complete = DATA(lv_complete) ).
+      DATA lv_parent_signature TYPE string.
+      CLEAR lv_parent_signature.
+      IF ls_commit-parent IS NOT INITIAL.
+        READ TABLE ls_pull-objects INTO DATA(ls_parent_object) WITH KEY type COMPONENTS
+          type = zif_abapgit_git_definitions=>c_type-commit sha1 = ls_commit-parent.
+        IF sy-subrc <> 0.
+          rs_history-truncated = abap_true.
+          EXIT.
+        ENDIF.
+        DATA(ls_parent) = zcl_abapgit_git_pack=>decode_commit( ls_parent_object-data ).
+        tree_signature( EXPORTING it_objects = ls_pull-objects iv_tree = ls_parent-tree it_paths = it_paths
+          IMPORTING ev_signature = lv_parent_signature ).
+      ENDIF.
+      IF lv_current <> lv_parent_signature AND ( ls_commit-parent IS NOT INITIAL OR lv_present = abap_true ).
+        DATA lv_author TYPE string.
+        DATA lv_seconds TYPE string.
+        DATA lv_zone TYPE string.
+        CLEAR: lv_author, lv_seconds, lv_zone.
+        FIND REGEX '^(.*) <[^>]*> ([0-9]+) ([+-][0-9]{4})$' IN ls_commit-author
+          SUBMATCHES lv_author lv_seconds lv_zone.
+        DATA lv_date TYPE string.
+        lv_date = lv_seconds.
+        TRY.
+            DATA lv_stamp TYPE timestampl.
+            lv_stamp = cl_abap_tstmp=>add( tstmp = CONV timestamp( '19700101000000' ) secs = CONV i( lv_seconds ) ).
+            DATA lv_day TYPE d.
+            DATA lv_time TYPE t.
+            CONVERT TIME STAMP lv_stamp TIME ZONE 'UTC' INTO DATE lv_day TIME lv_time.
+            lv_date = |{ lv_day DATE = ISO } { lv_time TIME = ISO } UTC|.
+          CATCH cx_root.
+            lv_date = lv_seconds.
+        ENDTRY.
+        APPEND VALUE #( commit = to_lower( lv_commit ) author = lv_author date = lv_date
+          message = ls_commit-body present = lv_present complete = lv_complete ) TO rs_history-versions.
+      ENDIF.
+      lv_commit = ls_commit-parent.
+      lv_scanned = lv_scanned + 1.
+    ENDWHILE.
+    IF lv_commit IS NOT INITIAL.
+      rs_history-truncated = abap_true.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD read_version.
+    IF strlen( iv_commit ) <> 40 OR iv_commit CN '0123456789abcdef'.
+      zcx_abapgit_exception=>raise( 'Invalid history commit' ).
+    ENDIF.
+    DATA(ls_pull) = zcl_abapgit_git_porcelain=>pull_by_commit(
+      iv_url = mv_url iv_commit_hash = CONV #( iv_commit ) ).
+    rs_content-branch_found = abap_true.
+    rs_content-commit = to_lower( ls_pull-commit ).
+    LOOP AT ls_pull-files INTO DATA(ls_file).
+      DATA(lv_path) = ls_file-path && ls_file-filename.
+      IF lv_path(1) = '/'.
+        lv_path = lv_path+1.
+      ENDIF.
+      INSERT VALUE #( path = lv_path sha1 = to_lower( ls_file-sha1 ) ) INTO TABLE rs_content-files.
+    ENDLOOP.
     mt_pulled = ls_pull-files.
   ENDMETHOD.
 

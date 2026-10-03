@@ -10,7 +10,14 @@ its reason.
 Packages and links are implemented; SAP acceptance is pending. Version 0.9.3
 groups transformation/conversion workbooks with their definitions into one
 overview row and one commit/restore selection. Pair restore is transactional
-and verifies the written Data Manager content. History is still not started.
+and verifies the written Data Manager content. History was the next step.
+Version 0.10.0 adds History for one selected item and restore of complete
+historical versions, including workbook/definition pairs. History follows up to
+1,000 first-parent branch commits. Historical restores preserve the current
+head comparison baseline so restored older content can be committed. Local UI
+regressions pass; remote class syntax and service/handler syntax with stand-ins
+for new cross-class APIs were checked through ADT. Full activation and SAP
+acceptance remain the user's abapGit/browser steps.
 The sections below preserve the earlier session handover; use SPEC.md and
 AGENTS.md for current behavior and the authorized commit/push workflow.
 
@@ -143,7 +150,7 @@ Ground rules:
 ### What is tracked
 Paths are below `\ROOT\WEBFOLDERS\<ENV>\` in BPC, and the same path is used in
 Git with `/` separators. One classifier, `ZCL_BPC_GIT_SERVICE->GET_KIND`
-(path → kind), decides what is tracked for BPC and Git alike.
+(path â†’ kind), decides what is tracked for BPC and Git alike.
 
 | Kind | BPC location | Notes |
 |---|---|---|
@@ -230,7 +237,7 @@ type at a time, driven by a table of folders and types for each model.
     package goes below `<MODEL>/TEAM FILES/<TEAM_ID>/`.
   - The file is hand-built XML: `<package>` with `group`, `id`, `team`,
     `description`, `type`, `userGroup` and `chain`, then
-    `<script><line>…</line></script>`, one `<line>` per script step.
+    `<script><line>â€¦</line></script>`, one `<line>` per script step.
   - The script is stored in `UJD_INSTRUCTION2-CONTENT` with the literal
     **`<BR>`** as line separator; it is split on `<BR>` and joined back with
     `<BR>` plus a trailing `<BR>`.
@@ -317,7 +324,7 @@ plus `ZCL_ABAPGIT_GIT_PACK` (decode commits). The other route is
 `ZCL_BPC_GIT_REMOTE`.
 
 ## 8. Key files
-- `docs/SPEC.md`: the functional spec, with decisions Q1–Q8 and the
+- `docs/SPEC.md`: the functional spec, with decisions Q1â€“Q8 and the
   sections on what is tracked, change detection, architecture and security.
 - `README.md`: the API table and build steps.
 - `tools/abapgit_fmt.py`: the byte-format helper.
