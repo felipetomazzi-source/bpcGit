@@ -25,6 +25,7 @@ checks use stand-ins only for cross-class APIs not yet installed in SAP.
 User confirmed the prior restore/history workflow works. This release still
 needs abapGit pull/activation and browser acceptance, including scoped pairs,
 Git-only files, model switching, and first-load versus refresh timing.
+Version 0.11.1 adds optional All objects loading; EPM workbooks stays the default.
 The sections below preserve the earlier session handover; use SPEC.md and
 AGENTS.md for current behavior and the authorized commit/push workflow.
 

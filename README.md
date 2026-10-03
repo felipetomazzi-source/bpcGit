@@ -97,3 +97,6 @@ comparison milliseconds (also available as `timings` in `/workbooks`). Use these
 to compare one model with all models and first load with refresh before deciding
 whether parallel SAP processing is worthwhile. Shared buffer reuse is local to
 an application server and is a best-effort optimization.
+
+Version 0.11.1 adds **All objects** to the type choices. EPM workbooks remains
+the default; All objects loads every supported type in the selected model scope.

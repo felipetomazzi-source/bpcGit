@@ -492,3 +492,7 @@ Reuse is best effort on one application server. No new DDIC objects are required
 `timings` reports `bpcMs`, `gitMs`, `compareMs`; the page shows total client elapsed
 seconds with the server stages in a tooltip. This first step reduces work and
 measures it. Parallel processing remains deferred until SAP measurements justify it.
+
+Version 0.11.1 offers All objects (`ALL` in the UI, empty API `kind`) alongside
+the six types. EPM workbooks remains the default. The optional model still
+restricts the scan; All models plus All objects performs the full comparison.

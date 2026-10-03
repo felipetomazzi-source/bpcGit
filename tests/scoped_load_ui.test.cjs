@@ -70,6 +70,16 @@ const response = { branch: 'main', branchFound: true, commit: 'a'.repeat(40),
   assert.equal(f.data.workbooksBusy, false);
 
   f = fixture();
+  f.data.loadScope = { kind: 'ALL', model: 'MODEL' };
+  f.instance.onLoadWorkbooks();
+  assert.equal(f.pending[0].params.kind, '', 'All objects uses the backend all-type scope');
+  assert.equal(f.pending[0].params.model, 'MODEL', 'All objects preserves the selected model');
+  f.pending[0].resolve(response); await tick();
+  f.instance.onRefreshWorkbooks();
+  assert.equal(f.pending[1].params.kind, '', 'refresh preserves All objects');
+  f.pending[1].resolve(response); await tick();
+
+  f = fixture();
   f.instance._loadConfig('ENV');
   f.data.environment = 'OTHER';
   f.pending[0].resolve({ configured: true }); await tick();
