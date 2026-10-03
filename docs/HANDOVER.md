@@ -7,6 +7,12 @@ its reason.
 
 ## Current update (2026-10-03)
 
+2026-10-04: `tests/opa` adds a local OPA5/QUnit browser harness against the real
+BSP frontend and pinned OpenUI5 1.52.48, with read-only mock responses. The first
+dimension-selection/load journey passes all seven assertions in Chromium driven
+by Playwright. It checks actual controls, bindings and rendered member names;
+it does not replace deployed SAP backend acceptance. See tests/opa/README.md.
+
 Packages and links are implemented; SAP acceptance is pending. Version 0.9.3
 groups transformation/conversion workbooks with their definitions into one
 overview row and one commit/restore selection. Pair restore is transactional

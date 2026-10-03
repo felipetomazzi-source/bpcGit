@@ -1,0 +1,15 @@
+{
+  "name": "bpcgit-opa-tests",
+  "private": true,
+  "scripts": {
+    "start": "node server.cjs"
+  },
+  "devDependencies": {
+    "@openui5/sap.m": "1.52.48",
+    "@openui5/sap.ui.core": "1.52.48",
+    "@openui5/sap.ui.layout": "1.52.48",
+    "@openui5/sap.ui.unified": "1.52.48",
+    "@openui5/themelib_sap_belize": "1.52.48",
+    "less-openui5": "0.12.0"
+  }
+}
