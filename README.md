@@ -21,12 +21,19 @@ Base path: `/sap/bc/zbpc_git` (handler `ZCL_BPC_GIT_HTTP`)
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/ping` | Caller, system, client and the installed abapGit version |
+| GET | `/environments` | BPC environments the user may access |
+| GET | `/destinations` | SM59 HTTP connections to external servers (type G) |
+| GET | `/config?environment=<id>` | Repository setup of an environment |
+| POST | `/config` | Save it (`environment`, `url`, `branch`, `destination`) |
+
+POST requests must carry `X-Requested-With: XMLHttpRequest` (jQuery sets it), so
+a form on another website cannot change data with the user's session.
 
 ## Build steps
 
 1. BSP app shell (done)
-2. REST handler with `/ping`, shown on the start page
-3. Config table and setup screen
+2. REST handler with `/ping`, shown on the start page (done)
+3. Config table `ZBPC_GIT_REPO` and setup screen
 4. abapGit wrapper, runtime exit, "Test connection"
 5. Workbook list with Git status
 6. Commit, 7. Restore, 8. History
