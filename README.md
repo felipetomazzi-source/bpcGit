@@ -13,3 +13,20 @@ After pulling with abapGit, the app runs at
 `/sap/bc/ui5_ui5/sap/zbpc_git/index.html?sap-client=<client>`.
 Use this UI5 path, not `/sap/bc/bsp/sap/...`: the BSP runtime rejects host
 names without a domain (`CX_FQDN`), such as `vhcalnplci`.
+
+## REST API
+
+Base path: `/sap/bc/zbpc_git` (handler `ZCL_BPC_GIT_HTTP`)
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/ping` | Caller, system, client and the installed abapGit version |
+
+## Build steps
+
+1. BSP app shell (done)
+2. REST handler with `/ping`, shown on the start page
+3. Config table and setup screen
+4. abapGit wrapper, runtime exit, "Test connection"
+5. Workbook list with Git status
+6. Commit, 7. Restore, 8. History
