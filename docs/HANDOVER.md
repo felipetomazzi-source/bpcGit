@@ -26,6 +26,16 @@ processing or content-repository commit was performed during this smoke test;
 those acceptance cases remain pending. Browser SAP/abapGit access was expressly
 authorized by the user; ADT source writes remain outside the approved workflow.
 
+2026-10-04 new-member acceptance: at the user's explicit request, the BPC MCP
+created ACCOUNT member BPCGIT_TEST_20261004 in CH_PLANNING, description
+"bpcGit new-member detection test", ACCTYPE=AST, LOCKED_FOR_PLANNING=N.
+The native Save succeeded with processing disabled. Reloading ACCOUNT through
+Playwright increased the total from 958 to 959; searching the ID showed exactly
+one row, BPCGIT_TEST_20261004.xml, status New in BPC, location Dimension ACCOUNT.
+Load took 0.8 seconds (listing 226 ms, Git 378 ms, comparison 78 ms). This proves
+saved unprocessed additions are visible. The test member remains in the working
+copy and has not been processed or committed to the BPC content repository.
+
 Packages and links are implemented; SAP acceptance is pending. Version 0.9.3
 groups transformation/conversion workbooks with their definitions into one
 overview row and one commit/restore selection. Pair restore is transactional
