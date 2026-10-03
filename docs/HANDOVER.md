@@ -16,6 +16,16 @@ Diff is read-only. Diff/scope/history regressions and ADT service syntax pass;
 HTTP syntax passes with a signature stand-in for the new service method before
 deployment. SAP browser validation is recorded below when completed.
 
+0.15.0 deployed acceptance (2026-10-04): pulled main through abapGit and activated
+the changed BSP pages; repository reported zero changes. Playwright opened Diff
+for AGGR_OPEX_CALC.LGF and verified the existing comment edit appears as Git-minus
+and BPC-plus with correct line numbers. IMPORT.XLS shows differing workbook bytes
+but identical IMPORT.TDM, including the comma delimiter. CONVERSION.XLS is new
+in BPC; its companion CONVERSION.CDM renders all conversion rules as additions
+against missing Git content. Source-like XML/JavaScript appears as literal text.
+No BPC content or content-repository commit/restore was performed. Full HTTP
+syntax also passes against the installed service API after deployment.
+
 2026-10-04: `tests/opa` adds a local OPA5/QUnit browser harness against the real
 BSP frontend and pinned OpenUI5 1.52.48, with read-only mock responses. The first
 dimension-selection/load journey passes all seven assertions in Chromium driven
