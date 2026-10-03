@@ -270,10 +270,16 @@ the Git host wants it.
   `"authRequired": true`. (Not 401, so the browser does not show its own
   logon popup.) The app then shows a login dialog (user and personal access
   token) and retries the request.
-- The app keeps the login in the page's memory only: not in local storage, not
-  in the model, never in a URL. It sends it in the POST body of each request
-  that talks to the Git host, and it is gone when the page reloads. "Log out"
-  forgets it earlier.
+- The app keeps the login in the browser tab's `sessionStorage` (revised
+  2026-10-03 at the user's request, so it survives page reloads): it is gone
+  when the tab or browser closes, or on "Log out". Only the user name is kept
+  longer, in `localStorage`, to pre-fill the dialog. The token is never in a
+  URL or the UI model. It is sent in the POST body of each request that talks
+  to the Git host.
+- Trade-off: browser storage is plain text, readable by any page of the same
+  origin (the whole SAP host and port). `sessionStorage` limits that to the
+  open tab; `localStorage` for the token was considered and not chosen.
+  Encryption in the browser (WebCrypto) is not available over plain HTTP.
 - The server puts it in the login manager for that one request
   (`ZCL_BPC_GIT_REMOTE` constructor) and never stores or logs it.
 - GitHub needs a personal access token, not the account password.
@@ -293,8 +299,8 @@ the Git host wants it.
 
 ## 8. Security
 
-- **Token storage.** The token is never stored, on the server or in the
-  browser (section 7.2).
+- **Token storage.** Never on the server; in the browser only in the tab's
+  `sessionStorage` (section 7.2).
 - **Authorization.** Only BPC admins of the environment can set up the
   repository and restore files. Committing needs at least read access to the
   files. The service checks this through the BPC user context.
