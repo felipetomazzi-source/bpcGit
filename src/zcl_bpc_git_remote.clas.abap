@@ -700,6 +700,18 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
                                                      iv_url = mv_url
                                                      iv_branch_name = mv_branch_ref ).
     rv_commit = to_lower( ls_push-branch ).
+    " Refresh can reuse the new path/hash index without pulling all blobs again.
+    DATA(ls_metadata) = VALUE ty_branch_content( branch_found = abap_true commit = rv_commit files = mt_files ).
+    LOOP AT it_changes INTO DATA(ls_changed).
+      DELETE TABLE ls_metadata-files WITH TABLE KEY path = ls_changed-path.
+      IF ls_changed-delete = abap_false.
+        INSERT VALUE #( path = ls_changed-path sha1 = blob_sha1( ls_changed-data ) ) INTO TABLE ls_metadata-files.
+      ENDIF.
+    ENDLOOP.
+    DATA lv_cache_key TYPE c LENGTH 40.
+    lv_cache_key = blob_sha1( cl_abap_codepage=>convert_to(
+      |{ sy-mandt }/{ sy-uname }/{ mv_cache_user }/{ mv_url }/{ mv_branch_ref }| ) ).
+    EXPORT metadata = ls_metadata TO SHARED BUFFER indx(bg) ID lv_cache_key.
   ENDMETHOD.
 
   METHOD check_push_access.

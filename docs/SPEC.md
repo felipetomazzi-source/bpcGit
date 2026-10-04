@@ -836,3 +836,14 @@ metadata cache; redirects are refused and each Git file is limited to 16 MB.
 Existing text decoding/rendering limits and binary summaries apply. Other hosts
 retain abapGit branch reads. Generated BPC providers still serialize their
 scoped listing, so this change does not eliminate all BPC-side listing cost.
+
+## Selected-object commit validation (0.15.8)
+
+Commit's fresh overview is limited to selected paths and same-stem transformation/
+conversion companions before status comparison. All companion eligibility and
+expected-head checks still apply. Other overview/restore callers retain their
+existing scope. After a successful abapGit push, the updated path/hash index and
+returned head are exported to the existing user/repository scoped shared buffer;
+refresh still verifies remote authorization and current head before reuse.
+No binary contents or credentials are cached. A changed head or eviction falls
+back to a fresh pull. The initial commit Git pull and BPC provider listing remain.

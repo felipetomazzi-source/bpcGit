@@ -133,6 +133,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_kind TYPE string OPTIONAL
                 iv_model TYPE string OPTIONAL
                 iv_dimension TYPE string OPTIONAL
+                it_paths TYPE string_table OPTIONAL
       RETURNING VALUE(rs_overview) TYPE ty_overview
       RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
     METHODS get_history
@@ -284,6 +285,9 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS matches_scope
       IMPORTING iv_path TYPE string iv_kind TYPE string
       RETURNING VALUE(rv_matches) TYPE abap_bool.
+    METHODS selected_path
+      IMPORTING iv_path TYPE string it_paths TYPE string_table
+      RETURNING VALUE(rv_selected) TYPE abap_bool.
     METHODS selection_scope
       IMPORTING it_paths TYPE string_table
       EXPORTING ev_kind TYPE string ev_model TYPE string ev_dimension TYPE string.
@@ -479,6 +483,13 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DATA lv_end TYPE i.
     GET RUN TIME FIELD lv_start.
     DATA(lt_bpc) = list_workbooks( iv_environment = iv_environment iv_kind = iv_kind iv_model = iv_model iv_dimension = iv_dimension ).
+    IF it_paths IS NOT INITIAL.
+      LOOP AT lt_bpc INTO DATA(ls_candidate).
+        IF selected_path( iv_path = ls_candidate-path it_paths = it_paths ) = abap_false.
+          DELETE lt_bpc WHERE path = ls_candidate-path.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
     GET RUN TIME FIELD lv_end.
     rs_overview-bpc_ms = ( lv_end - lv_start ) / 1000.
     GET RUN TIME FIELD lv_start.
@@ -537,7 +548,8 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
           OR ( lv_kind = c_kind-dimmember AND lv_members_allowed = abap_false ).
         CONTINUE.
       ENDIF.
-      IF lv_kind IS INITIAL OR matches_scope( iv_path = ls_git-path iv_kind = iv_kind ) = abap_false
+      IF selected_path( iv_path = ls_git-path it_paths = it_paths ) = abap_false
+          OR lv_kind IS INITIAL OR matches_scope( iv_path = ls_git-path iv_kind = iv_kind ) = abap_false
           OR ( iv_model IS NOT INITIAL AND get_model( ls_git-path ) <> iv_model )
           OR ( iv_dimension IS NOT INITIAL AND zcl_bpc_git_members=>get_dimension( ls_git-path ) <> iv_dimension )
           OR line_exists( lt_bpc[ path = ls_git-path ] ).
@@ -585,6 +597,26 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         WHEN 'REPORTS' THEN 'REPORT' WHEN 'INPUT SCHEDULES' THEN 'SCHEDULE' ELSE 'OTHER' ).
     ENDIF.
     rv_matches = xsdbool( iv_kind = lv_subtype ).
+  ENDMETHOD.
+
+  METHOD selected_path.
+    rv_selected = abap_true.
+    IF it_paths IS INITIAL OR line_exists( it_paths[ table_line = iv_path ] ).
+      RETURN.
+    ENDIF.
+    rv_selected = abap_false.
+    DATA(lv_kind) = get_kind( iv_path ).
+    IF lv_kind <> c_kind-transformation AND lv_kind <> c_kind-conversion.
+      RETURN.
+    ENDIF.
+    DATA(lv_stem) = substring_before( val = iv_path sub = '.' occ = -1 ).
+    LOOP AT it_paths INTO DATA(lv_selected).
+      IF get_kind( lv_selected ) = lv_kind
+          AND substring_before( val = lv_selected sub = '.' occ = -1 ) = lv_stem.
+        rv_selected = abap_true.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD selection_scope.
@@ -781,7 +813,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DATA(ls_config) = get_config( iv_environment ).
     selection_scope( EXPORTING it_paths = it_paths IMPORTING ev_kind = DATA(lv_scope_kind) ev_model = DATA(lv_scope_model) ev_dimension = DATA(lv_scope_dimension) ).
     DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote
-      iv_individual = abap_true iv_kind = lv_scope_kind iv_model = lv_scope_model iv_dimension = lv_scope_dimension ).
+      iv_individual = abap_true iv_kind = lv_scope_kind iv_model = lv_scope_model iv_dimension = lv_scope_dimension it_paths = it_paths ).
     IF ls_overview-branch_found = abap_false.
       ev_error = |Branch { ls_config-branch } does not exist in the repository yet. | &&
                  |Create it on the Git host first, for example by adding a README file.|.

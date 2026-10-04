@@ -7,6 +7,16 @@ its reason.
 
 ## Current update (2026-10-03)
 
+0.15.8 limits commit status comparison to selected paths and transformation/
+conversion companions, preserving grouping/conflict checks. After successful
+abapGit push, the fresh branch path/hash index is published to the existing BG
+metadata cache so the subsequent refresh can avoid another full Git download.
+Commit still pulls fresh Git content; generated BPC listing/serialization and
+post-action BPC refresh remain scoped but may be expensive. No custom Git writer,
+REST push or history rewrite is introduced. Formatter and Diff/history/scope/
+login UI checks pass. ADT is still failing HTTP 400; SAP validation/deployment
+results will be recorded after the authorized Playwright abapGit pull.
+
 0.15.7 removes Diff's full status comparison. BPC listing still covers the
 selected kind/model (generated providers still serialize that scope). Bitbucket
 Diff now reads only selected path(s) at a freshly authorized, pinned Git head;
