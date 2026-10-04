@@ -249,6 +249,26 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     ls_config-appset = lv_environment.
     ls_config-url = lv_url.
     ls_config-branch = lv_branch.
+    DATA(lv_lfs_enabled) = read_field( iv_name = 'lfsEnabled' iv_label = 'Git LFS enabled'
+      iv_max_length = 5 iv_required = abap_false ).
+    DATA(lv_lfs_mb) = read_field( iv_name = 'lfsThresholdMb' iv_label = 'Git LFS threshold'
+      iv_max_length = 3 iv_required = abap_false ).
+    IF mv_invalid = abap_true.
+      RETURN.
+    ENDIF.
+    IF lv_lfs_enabled IS NOT INITIAL AND lv_lfs_enabled <> 'true' AND lv_lfs_enabled <> 'false'.
+      respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'Invalid Git LFS option' ).
+      RETURN.
+    ENDIF.
+    ls_config-lfs_enabled = xsdbool( lv_lfs_enabled = 'true' ).
+    ls_config-lfs_mb = 5.
+    IF lv_lfs_mb IS NOT INITIAL.
+      IF lv_lfs_mb CN '0123456789'.
+        respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'Git LFS threshold must be a whole number from 1 to 100 MB' ).
+        RETURN.
+      ENDIF.
+      ls_config-lfs_mb = lv_lfs_mb.
+    ENDIF.
 
     DATA(lv_message) = io_service->save_config( ls_config ).
     IF lv_message IS NOT INITIAL.
@@ -630,7 +650,8 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       RETURN.
     ENDIF.
     ev_with_login = xsdbool( lv_user IS NOT INITIAL AND lv_token IS NOT INITIAL ).
-    eo_remote = NEW zcl_bpc_git_remote( iv_url = es_config-url iv_user = lv_user iv_token = lv_token ).
+    eo_remote = NEW zcl_bpc_git_remote( iv_url = es_config-url iv_user = lv_user iv_token = lv_token
+      iv_lfs_enabled = es_config-lfs_enabled iv_lfs_mb = COND #( WHEN es_config-lfs_mb > 0 THEN es_config-lfs_mb ELSE 5 ) ).
   ENDMETHOD.
 
   METHOD respond_git_error.
@@ -654,6 +675,8 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       `,"configured":` && COND string( WHEN is_config IS INITIAL THEN `false` ELSE `true` ) &&
       `,"url":` && quote( is_config-url ) &&
       `,"branch":` && quote( is_config-branch ) &&
+      `,"lfsEnabled":` && COND string( WHEN is_config-lfs_enabled = abap_true THEN `true` ELSE `false` ) &&
+      `,"lfsThresholdMb":` && CONV string( COND i( WHEN is_config-lfs_mb > 0 THEN is_config-lfs_mb ELSE 5 ) ) &&
       `,"changedBy":` && quote( is_config-changed_by ) &&
       `,"changedAt":` && quote( lv_changed_at ) && `}`.
   ENDMETHOD.

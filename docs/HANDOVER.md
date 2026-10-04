@@ -7,6 +7,21 @@ its reason.
 
 ## Current update (2026-10-03)
 
+0.16.0 adds opt-in Bitbucket Cloud Git LFS for large EPM workbooks. Repository
+setup defaults off with a 5 MB threshold (1–100 MB). ZBPC_GIT_REPO gains
+LFS_ENABLED/LFS_MB; ZCL_BPC_GIT_LFS implements basic batch/upload/verify/download,
+canonical pointer parsing, SHA-256 verification and exact root attributes.
+Status/hash cache and sync baselines understand pointers without large-object
+downloads. Current/historical restore resolves pointers before BPC writes.
+Only future changed workbook commits convert; old Git history is retained.
+Nested attributes, malformed/extended pointers and transfers over 128 MB are
+refused. Existing LFS writes require opt-in; reads work with it off. No workbook
+or BPC content has been changed during implementation. Formatter, LFS setup UI, Diff/history/scope/login regressions and real Git/LFS
+pointer/quoted filename compatibility checks pass. ABAP Unit fixtures cover
+upload/verify, existing objects, corrupt downloads, headers, thresholds and
+local pointer hash comparisons; execution in SAP is pending. ADT source and
+syntax calls still fail HTTP 400. Deployment and live LFS acceptance pending.
+
 0.15.8 limits commit status comparison to selected paths and transformation/
 conversion companions, preserving grouping/conflict checks. After successful
 abapGit push, the fresh branch path/hash index is published to the existing BG

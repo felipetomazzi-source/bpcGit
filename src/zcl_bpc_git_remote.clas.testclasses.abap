@@ -93,3 +93,38 @@ CLASS ltcl_bitbucket_history IMPLEMENTATION.
     ENDTRY.
   ENDMETHOD.
 ENDCLASS.
+
+CLASS ltcl_lfs_hash DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
+  PRIVATE SECTION.
+    METHODS threshold_and_compare FOR TESTING RAISING zcx_abapgit_exception.
+    METHODS existing_lfs FOR TESTING RAISING zcx_abapgit_exception.
+ENDCLASS.
+
+CLASS ltcl_lfs_hash IMPLEMENTATION.
+  METHOD threshold_and_compare.
+    DATA(remote) = NEW zcl_bpc_git_remote( iv_url = 'https://bitbucket.org/test/repo'
+      iv_lfs_enabled = abap_true iv_lfs_mb = 1 ).
+    DATA(data) = cl_abap_codepage=>convert_to( repeat( val = 'a' occ = 1048576 ) ).
+    DATA(path) = `M/EEXCEL/REPORTS/X.XLSX`.
+    cl_abap_unit_assert=>assert_equals( act = remote->content_hash( iv_path = path iv_data = data )
+      exp = zcl_bpc_git_remote=>blob_sha1( data ) ).
+    cl_abap_unit_assert=>assert_equals( act = remote->content_hash( iv_path = path iv_data = data iv_staged = abap_true )
+      exp = zcl_bpc_git_remote=>blob_sha1( zcl_bpc_git_lfs=>pointer( data ) ) ).
+    cl_abap_unit_assert=>assert_equals( act = remote->content_hash(
+      iv_path = 'M/DATAMANAGER/TRANSFORMATIONFILES/X.XLS' iv_data = data iv_staged = abap_true )
+      exp = zcl_bpc_git_remote=>blob_sha1( data ) ).
+    data = data(1048575).
+    cl_abap_unit_assert=>assert_equals( act = remote->content_hash( iv_path = path iv_data = data iv_staged = abap_true )
+      exp = zcl_bpc_git_remote=>blob_sha1( data ) ).
+  ENDMETHOD.
+
+  METHOD existing_lfs.
+    DATA(remote) = NEW zcl_bpc_git_remote( iv_url = 'https://bitbucket.org/test/repo' ).
+    DATA(data) = cl_abap_codepage=>convert_to( 'abc' ).
+    DATA(path) = `M/EEXCEL/REPORTS/X.XLSX`.
+    INSERT VALUE #( path = path pointer = zcl_bpc_git_lfs=>parse( zcl_bpc_git_lfs=>pointer( data ) ) ) INTO TABLE remote->mt_lfs.
+    " Existing pointers compare correctly even with the opt-in turned off.
+    cl_abap_unit_assert=>assert_equals( act = remote->content_hash( iv_path = path iv_data = data )
+      exp = zcl_bpc_git_remote=>blob_sha1( zcl_bpc_git_lfs=>pointer( data ) ) ).
+  ENDMETHOD.
+ENDCLASS.

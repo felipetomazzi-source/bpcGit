@@ -393,6 +393,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     "! Status of a workbook that is in BPC and in Git (section 6).
     METHODS compare
       IMPORTING io_files TYPE REF TO cl_ujf_file_service_mgr
+                io_remote TYPE REF TO zcl_bpc_git_remote
                 is_bpc TYPE ty_bpc_workbook
                 iv_git_sha1 TYPE string
                 is_state TYPE zbpc_git_state
@@ -455,6 +456,18 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       RETURN.
     ENDIF.
 
+    IF is_config-lfs_enabled = abap_true.
+      FIND REGEX '^https://bitbucket[.]org/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?$' IN lv_url.
+      IF sy-subrc <> 0.
+        rv_message = 'Git LFS currently supports Bitbucket Cloud repositories only'.
+        RETURN.
+      ENDIF.
+    ENDIF.
+    IF is_config-lfs_mb < 1 OR is_config-lfs_mb > 100.
+      rv_message = 'Git LFS threshold must be between 1 and 100 MB'.
+      RETURN.
+    ENDIF.
+
     " One environment per repository: both would write the same paths.
     SELECT SINGLE appset FROM zbpc_git_repo
       WHERE url = @lv_url AND appset <> @is_config-appset
@@ -468,6 +481,8 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       appset     = is_config-appset
       url        = lv_url
       branch     = lv_branch
+      lfs_enabled = is_config-lfs_enabled
+      lfs_mb = is_config-lfs_mb
       changed_by = sy-uname ).
     GET TIME STAMP FIELD ls_config-changed_at.
     MODIFY zbpc_git_repo FROM ls_config.
@@ -531,7 +546,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         ls_row-status = COND #( WHEN lv_synced = abap_true THEN c_status-deleted_git
                                 ELSE c_status-new_bpc ).
       ELSE.
-        ls_row-status = compare( io_files = lo_files is_bpc = ls_bpc iv_git_sha1 = ls_git-sha1
+        ls_row-status = compare( io_files = lo_files io_remote = io_remote is_bpc = ls_bpc iv_git_sha1 = ls_git-sha1
                                  is_state = ls_state iv_synced = lv_synced ).
       ENDIF.
       APPEND ls_row TO rs_overview-workbooks.
@@ -848,7 +863,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         APPEND VALUE #( path = lv_path data = lv_document ) TO lt_changes.
         APPEND VALUE #( appset      = iv_environment
                         docname     = ls_workbook-docname
-                        blob_sha1   = zcl_bpc_git_remote=>blob_sha1( lv_document )
+                        blob_sha1   = io_remote->content_hash( iv_path = lv_path iv_data = lv_document iv_staged = abap_true )
                         lstmod_date = ls_workbook-lstmod_date
                         lstmod_time = ls_workbook-lstmod_time
                         synced_by   = sy-uname ) TO lt_synced.
@@ -1217,7 +1232,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DATA lv_bpc_sha1 TYPE string.
     IF is_bpc-generated = abap_true.
       " No BPC timestamp to rely on; the generated file is at hand
-      lv_bpc_sha1 = zcl_bpc_git_remote=>blob_sha1( is_bpc-content ).
+      lv_bpc_sha1 = io_remote->content_hash( iv_path = is_bpc-path iv_data = is_bpc-content ).
     ELSEIF iv_synced = abap_true
         AND is_bpc-lstmod_date = is_state-lstmod_date AND is_bpc-lstmod_time = is_state-lstmod_time.
       " Not touched in BPC since the last sync
@@ -1225,7 +1240,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     ELSE.
       io_files->get_document( EXPORTING i_docname = is_bpc-docname i_retzip = abap_false
                               IMPORTING e_document_content = lv_document ).
-      lv_bpc_sha1 = zcl_bpc_git_remote=>blob_sha1( lv_document ).
+      lv_bpc_sha1 = io_remote->content_hash( iv_path = is_bpc-path iv_data = lv_document ).
     ENDIF.
 
     IF lv_bpc_sha1 = iv_git_sha1.

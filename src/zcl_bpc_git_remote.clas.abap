@@ -25,12 +25,19 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
       END OF ty_file,
       ty_files TYPE SORTED TABLE OF ty_file WITH UNIQUE KEY path.
     TYPES:
+      BEGIN OF ty_lfs_file,
+        path TYPE string,
+        pointer TYPE zcl_bpc_git_lfs=>ty_pointer,
+      END OF ty_lfs_file,
+      ty_lfs_files TYPE SORTED TABLE OF ty_lfs_file WITH UNIQUE KEY path.
+    TYPES:
       BEGIN OF ty_branch_content,
         "! False if the branch does not exist yet, e.g. in an empty repository
         branch_found TYPE abap_bool,
         "! Head commit of the branch
         commit       TYPE string,
         files        TYPE ty_files,
+        lfs          TYPE ty_lfs_files,
       END OF ty_branch_content.
     TYPES:
       BEGIN OF ty_change,
@@ -88,7 +95,12 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_url TYPE csequence
                 iv_user TYPE string OPTIONAL
                 iv_token TYPE string OPTIONAL
+                iv_lfs_enabled TYPE abap_bool DEFAULT abap_false
+                iv_lfs_mb TYPE i DEFAULT 5
       RAISING zcx_abapgit_exception.
+    METHODS content_hash
+      IMPORTING iv_path TYPE string iv_data TYPE xstring iv_staged TYPE abap_bool DEFAULT abap_false
+      RETURNING VALUE(rv_hash) TYPE string RAISING zcx_abapgit_exception.
     "! Reads the branches of the repository and, with credentials, checks
     "! that they may push.
     METHODS test_connection
@@ -124,11 +136,19 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
     DATA mv_url TYPE string.
     DATA mv_cache_user TYPE string.
     DATA mv_token TYPE string.
+    DATA mv_lfs_enabled TYPE abap_bool.
+    DATA mv_lfs_bytes TYPE i.
+    DATA mt_lfs TYPE ty_lfs_files.
+    METHODS use_lfs
+      IMPORTING iv_path TYPE string iv_data TYPE xstring
+      RETURNING VALUE(rv_yes) TYPE abap_bool.
+    METHODS index_lfs
+      CHANGING cs_content TYPE ty_branch_content RAISING zcx_abapgit_exception.
     DATA mv_bitbucket_api TYPE string.
     METHODS bitbucket_get
       IMPORTING iv_suffix TYPE string iv_allow_missing TYPE abap_bool DEFAULT abap_false
         iv_binary TYPE abap_bool DEFAULT abap_false
-      EXPORTING ev_content TYPE xstring ev_missing TYPE abap_bool
+      EXPORTING ev_content TYPE xstring ev_missing TYPE abap_bool ev_lfs_redirect TYPE abap_bool
       RETURNING VALUE(rv_json) TYPE string RAISING zcx_abapgit_exception.
     METHODS bitbucket_history
       IMPORTING iv_head TYPE string it_paths TYPE string_table iv_depth TYPE i
@@ -189,6 +209,11 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     mv_url = iv_url.
     mv_cache_user = iv_user.
     mv_token = iv_token.
+    mv_lfs_enabled = iv_lfs_enabled.
+    IF iv_lfs_mb < 1 OR iv_lfs_mb > 100.
+      zcx_abapgit_exception=>raise( 'Git LFS threshold must be between 1 and 100 MB' ).
+    ENDIF.
+    mv_lfs_bytes = iv_lfs_mb * 1048576.
     DATA lv_workspace TYPE string.
     DATA lv_repository TYPE string.
     FIND REGEX '^https://bitbucket[.]org/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/?$'
@@ -229,7 +254,7 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD read_branch.
-    CLEAR: mv_branch_ref, mv_commit, mt_files, mt_objects, mt_pulled.
+    CLEAR: mv_branch_ref, mv_commit, mt_files, mt_objects, mt_pulled, mt_lfs.
     DATA(lv_ref) = c_heads && iv_branch.
     DATA(lt_branches) = zcl_abapgit_git_transport=>branches( mv_url )->get_branches_only( ).
     IF NOT line_exists( lt_branches[ KEY name_key name = lv_ref ] ).
@@ -240,7 +265,7 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     " on every request; commits and restores always pull the full fresh tree.
     DATA lv_cache_key TYPE c LENGTH 40.
     lv_cache_key = blob_sha1( cl_abap_codepage=>convert_to(
-      |{ sy-mandt }/{ sy-uname }/{ mv_cache_user }/{ mv_url }/{ lv_ref }| ) ).
+      |lfs-v1/{ sy-mandt }/{ sy-uname }/{ mv_cache_user }/{ mv_url }/{ lv_ref }| ) ).
     IF iv_metadata_only = abap_true.
       DATA ls_cached TYPE ty_branch_content.
       TRY.
@@ -248,6 +273,7 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
           IF sy-subrc = 0 AND ls_cached-branch_found = abap_true
               AND ls_cached-commit = to_lower( lt_branches[ KEY name_key name = lv_ref ]-sha1 ).
             rs_content = ls_cached.
+            mt_lfs = ls_cached-lfs.
             RETURN.
           ENDIF.
         CATCH cx_sy_import_mismatch_error.
@@ -271,6 +297,7 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     mt_files = rs_content-files.
     mt_objects = ls_pull-objects.
     mt_pulled = ls_pull-files.
+    index_lfs( CHANGING cs_content = rs_content ).
     " Shared buffer may evict entries at any time; a miss simply pulls again.
     EXPORT metadata = rs_content TO SHARED BUFFER indx(bg) ID lv_cache_key.
   ENDMETHOD.
@@ -412,7 +439,7 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       DATA lv_cache_key TYPE c LENGTH 40.
       lv_cache_key = blob_sha1( cl_abap_codepage=>convert_to(
         |bitbucket-meta-v1/{ sy-mandt }/{ sy-uname }/{ mv_cache_user }/{ mv_bitbucket_api }/{ iv_suffix }| ) ).
-      CLEAR: ev_content, ev_missing.
+      CLEAR: ev_content, ev_missing, ev_lfs_redirect.
       IF iv_binary = abap_false.
       TRY.
           IMPORT metadata = rv_json FROM SHARED BUFFER indx(bi) ID lv_cache_key.
@@ -465,6 +492,13 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
         rv_json = lo_client->response->get_cdata( ).
       ENDIF.
       lo_client->close( ).
+      IF lv_status = 301 AND iv_binary = abap_true.
+        " Bitbucket raw-source API redirects LFS content to media storage.
+        " Read the actual pointer through Git instead of forwarding credentials.
+        CLEAR ev_content.
+        ev_lfs_redirect = abap_true.
+        RETURN.
+      ENDIF.
       IF lv_status = 404 AND iv_allow_missing = abap_true.
         CLEAR: rv_json, ev_content.
         ev_missing = abap_true.
@@ -625,6 +659,7 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       INSERT VALUE #( path = lv_path sha1 = to_lower( ls_file-sha1 ) ) INTO TABLE rs_content-files.
     ENDLOOP.
     mt_pulled = ls_pull-files.
+    index_lfs( CHANGING cs_content = rs_content ).
   ENDMETHOD.
 
   METHOD read_paths.
@@ -646,7 +681,15 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       DATA lv_missing TYPE abap_bool.
       bitbucket_get( EXPORTING iv_suffix = |/src/{ rs_content-commit }/{ cl_http_utility=>escape_url( lv_path ) }|
         iv_allow_missing = abap_true iv_binary = abap_true
-        IMPORTING ev_content = lv_data ev_missing = lv_missing ).
+        IMPORTING ev_content = lv_data ev_missing = lv_missing ev_lfs_redirect = DATA(lv_lfs_redirect) ).
+      IF lv_lfs_redirect = abap_true.
+        DATA(lv_expected) = rs_content-commit.
+        rs_content = read_branch( iv_branch ).
+        IF rs_content-commit <> lv_expected OR NOT line_exists( mt_lfs[ path = lv_path ] ).
+          zcx_abapgit_exception=>raise( 'Git head changed or raw-source redirect was not an LFS file; reload the list' ).
+        ENDIF.
+        RETURN.
+      ENDIF.
       IF lv_missing = abap_true.
         CONTINUE.
       ENDIF.
@@ -655,17 +698,58 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       APPEND VALUE #( path = |/{ substring_before( val = lv_path sub = '/' occ = -1 ) }/|
         filename = substring_after( val = lv_path sub = '/' occ = -1 ) data = lv_data sha1 = lv_sha1 ) TO mt_pulled.
     ENDLOOP.
+    index_lfs( CHANGING cs_content = rs_content ).
   ENDMETHOD.
 
   METHOD get_content.
     " abapGit keeps /folder/ and the file name separately
     DATA(lv_folder) = |/{ substring_before( val = iv_path sub = '/' occ = -1 ) }/|.
     DATA(lv_filename) = substring_after( val = iv_path sub = '/' occ = -1 ).
+    IF iv_path NS '/'.
+      lv_folder = '/'.
+      lv_filename = iv_path.
+    ENDIF.
     READ TABLE mt_pulled INTO DATA(ls_file) WITH KEY file_path COMPONENTS path = lv_folder filename = lv_filename.
     IF sy-subrc <> 0.
       zcx_abapgit_exception=>raise( |{ iv_path } is not in the repository| ).
     ENDIF.
     rv_data = ls_file-data.
+    DATA(ls_pointer) = zcl_bpc_git_lfs=>parse( rv_data ).
+    IF ls_pointer-oid IS NOT INITIAL.
+      DATA(lo_lfs) = NEW zcl_bpc_git_lfs( iv_url = mv_url iv_user = mv_cache_user iv_token = mv_token ).
+      rv_data = lo_lfs->download( ls_pointer ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD index_lfs.
+    CLEAR: mt_lfs, cs_content-lfs.
+    LOOP AT mt_pulled INTO DATA(ls_file).
+      DATA(ls_pointer) = zcl_bpc_git_lfs=>parse( ls_file-data ).
+      IF ls_pointer-oid IS NOT INITIAL.
+        DATA(lv_path) = ls_file-path && ls_file-filename.
+        IF lv_path(1) = '/'.
+          lv_path = lv_path+1.
+        ENDIF.
+        INSERT VALUE #( path = lv_path pointer = ls_pointer ) INTO TABLE mt_lfs.
+      ENDIF.
+    ENDLOOP.
+    cs_content-lfs = mt_lfs.
+  ENDMETHOD.
+
+  METHOD use_lfs.
+    rv_yes = xsdbool( xstrlen( iv_data ) > 0 AND ( line_exists( mt_lfs[ path = iv_path ] ) OR
+      ( mv_lfs_enabled = abap_true AND zcl_bpc_git_lfs=>eligible( iv_path ) = abap_true
+        AND xstrlen( iv_data ) >= mv_lfs_bytes ) ) ).
+  ENDMETHOD.
+
+  METHOD content_hash.
+    " Status compares LFS pointers locally; no large object download is needed.
+    IF ( iv_staged = abap_false AND line_exists( mt_lfs[ path = iv_path ] ) ) OR
+        ( iv_staged = abap_true AND use_lfs( iv_path = iv_path iv_data = iv_data ) = abap_true ).
+      rv_hash = blob_sha1( zcl_bpc_git_lfs=>pointer( iv_data ) ).
+    ELSE.
+      rv_hash = blob_sha1( iv_data ).
+    ENDIF.
   ENDMETHOD.
 
   METHOD commit.
@@ -673,11 +757,50 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       zcx_abapgit_exception=>raise( 'The branch must exist and be read before committing' ).
     ENDIF.
 
+    DATA(lt_changes) = it_changes.
+    DATA lv_attributes TYPE string.
+    DATA lv_attributes_changed TYPE abap_bool.
+    DATA lv_attributes_loaded TYPE abap_bool.
+    LOOP AT lt_changes ASSIGNING FIELD-SYMBOL(<ls_change>).
+      IF <ls_change>-delete = abap_false AND use_lfs( iv_path = <ls_change>-path iv_data = <ls_change>-data ) = abap_true.
+        IF mv_lfs_enabled = abap_false.
+          zcx_abapgit_exception=>raise( 'Enable Git LFS in Repository setup before committing an existing LFS workbook' ).
+        ENDIF.
+        IF zcl_bpc_git_lfs=>eligible( <ls_change>-path ) = abap_false.
+          zcx_abapgit_exception=>raise( 'Only EPM workbooks can be committed with Git LFS' ).
+        ENDIF.
+        " Nested rules override root attributes. Refuse ambiguous configurations.
+        LOOP AT mt_files INTO DATA(ls_attribute_file) WHERE path CP '*/.gitattributes'.
+          DATA(lv_prefix) = substring_before( val = ls_attribute_file-path sub = '.gitattributes' ).
+          IF strlen( <ls_change>-path ) >= strlen( lv_prefix ) AND
+              substring( val = <ls_change>-path len = strlen( lv_prefix ) ) = lv_prefix.
+            zcx_abapgit_exception=>raise( 'Nested .gitattributes affects this workbook; consolidate its rules at the repository root before using bpcGit LFS' ).
+          ENDIF.
+        ENDLOOP.
+        IF lv_attributes_loaded = abap_false.
+          IF line_exists( mt_files[ path = '.gitattributes' ] ).
+            lv_attributes = cl_abap_codepage=>convert_from( get_content( '.gitattributes' ) ).
+          ENDIF.
+          lv_attributes_loaded = abap_true.
+        ENDIF.
+        DATA(lo_lfs) = NEW zcl_bpc_git_lfs( iv_url = mv_url iv_user = mv_cache_user iv_token = mv_token ).
+        <ls_change>-data = lo_lfs->upload( <ls_change>-data ).
+        lv_attributes = zcl_bpc_git_lfs=>attributes( iv_attributes = lv_attributes iv_path = <ls_change>-path ).
+        lv_attributes_changed = abap_true.
+      ENDIF.
+    ENDLOOP.
+    IF lv_attributes_changed = abap_true.
+      APPEND VALUE #( path = '.gitattributes' data = cl_abap_codepage=>convert_to( lv_attributes ) ) TO lt_changes.
+    ENDIF.
     DATA(lo_stage) = NEW zcl_abapgit_stage( ).
-    LOOP AT it_changes INTO DATA(ls_change).
+    LOOP AT lt_changes INTO DATA(ls_change).
       " abapGit wants /folder/ and the file name separately
       DATA(lv_folder) = |/{ substring_before( val = ls_change-path sub = '/' occ = -1 ) }/|.
       DATA(lv_filename) = substring_after( val = ls_change-path sub = '/' occ = -1 ).
+      IF ls_change-path NS '/'.
+        lv_folder = '/'.
+        lv_filename = ls_change-path.
+      ENDIF.
       IF ls_change-delete = abap_true.
         " abapGit's push stops with an ASSERT for a file that is not in Git
         IF NOT line_exists( mt_files[ path = ls_change-path ] ).
@@ -688,6 +811,24 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
         lo_stage->add( iv_path = lv_folder iv_filename = lv_filename iv_data = ls_change-data ).
       ENDIF.
     ENDLOOP.
+
+    " Refresh can reuse the new path/hash index without pulling all blobs again.
+    DATA(ls_metadata) = VALUE ty_branch_content( branch_found = abap_true commit = mv_commit files = mt_files ).
+    ls_metadata-lfs = mt_lfs.
+    LOOP AT lt_changes INTO DATA(ls_changed).
+      DELETE TABLE ls_metadata-files WITH TABLE KEY path = ls_changed-path.
+      DELETE TABLE ls_metadata-lfs WITH TABLE KEY path = ls_changed-path.
+      IF ls_changed-delete = abap_false.
+        INSERT VALUE #( path = ls_changed-path sha1 = blob_sha1( ls_changed-data ) ) INTO TABLE ls_metadata-files.
+        DATA(ls_new_pointer) = zcl_bpc_git_lfs=>parse( ls_changed-data ).
+        IF ls_new_pointer-oid IS NOT INITIAL.
+          INSERT VALUE #( path = ls_changed-path pointer = ls_new_pointer ) INTO TABLE ls_metadata-lfs.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+    DATA lv_cache_key TYPE c LENGTH 40.
+    lv_cache_key = blob_sha1( cl_abap_codepage=>convert_to(
+      |lfs-v1/{ sy-mandt }/{ sy-uname }/{ mv_cache_user }/{ mv_url }/{ mv_branch_ref }| ) ).
 
     DATA ls_comment TYPE zif_abapgit_git_definitions=>ty_comment.
     ls_comment-committer-name = iv_author_name.
@@ -700,17 +841,7 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
                                                      iv_url = mv_url
                                                      iv_branch_name = mv_branch_ref ).
     rv_commit = to_lower( ls_push-branch ).
-    " Refresh can reuse the new path/hash index without pulling all blobs again.
-    DATA(ls_metadata) = VALUE ty_branch_content( branch_found = abap_true commit = rv_commit files = mt_files ).
-    LOOP AT it_changes INTO DATA(ls_changed).
-      DELETE TABLE ls_metadata-files WITH TABLE KEY path = ls_changed-path.
-      IF ls_changed-delete = abap_false.
-        INSERT VALUE #( path = ls_changed-path sha1 = blob_sha1( ls_changed-data ) ) INTO TABLE ls_metadata-files.
-      ENDIF.
-    ENDLOOP.
-    DATA lv_cache_key TYPE c LENGTH 40.
-    lv_cache_key = blob_sha1( cl_abap_codepage=>convert_to(
-      |{ sy-mandt }/{ sy-uname }/{ mv_cache_user }/{ mv_url }/{ mv_branch_ref }| ) ).
+    ls_metadata-commit = rv_commit.
     TRY.
         EXPORT metadata = ls_metadata TO SHARED BUFFER indx(bg) ID lv_cache_key.
       CATCH cx_root.

@@ -847,3 +847,60 @@ returned head are exported to the existing user/repository scoped shared buffer;
 refresh still verifies remote authorization and current head before reuse.
 No binary contents or credentials are cached. A changed head or eviction falls
 back to a fresh pull. The initial commit Git pull and BPC provider listing remain.
+
+
+## Opt-in Git LFS for large EPM workbooks (0.16.0)
+
+Repository setup offers **Use Git LFS (Bitbucket Cloud)** and a whole-number
+threshold of 1–100 MB (default 5 MB; 1 MB = 1,048,576 bytes). The option defaults
+to off, including existing configurations. It applies only to nonempty EPM
+Excel files below company/team EEXCEL folders, including reports, input schedules,
+books and distribution lists. Data Manager transformation/conversion workbooks,
+text and generated definitions continue using regular Git. Maximum LFS transfer
+size is 128 MB. GitHub, GitLab and Bitbucket Data Center LFS are not supported in
+this first implementation; regular Git for these hosts is unchanged.
+
+On a future selected commit, a qualifying workbook is uploaded through the
+Bitbucket Git LFS basic batch/upload/optional verification protocol **before**
+abapGit pushes its canonical SHA-256 pointer. The same Git commit adds exact,
+quoted root `.gitattributes` rules. Existing root attributes are preserved;
+nested `.gitattributes` that could override the selected workbook are refused.
+Rules escape filename glob characters, spaces, quotes and backslashes. Existing
+LFS workbooks keep using LFS when edited, even if they shrink below the threshold.
+Disabling the option refuses writes to existing nonempty LFS files rather than
+silently replacing their pointers with binaries. Deletion remains possible.
+Empty files use regular zero-byte Git blobs as Git LFS specifies.
+
+This does not migrate earlier commits or rewrite history. Previously committed
+binary workbooks switch to LFS only when subsequently changed and committed.
+Existing ordinary Git objects still contribute to pack downloads and repository
+size. Upload failure prevents Git push and sync-state updates. A later Git push
+failure may leave an unreferenced LFS object on the host, with no successful
+BPC sync recorded; Git LFS objects are immutable and retry-safe by hash.
+
+Overview status comparison hashes BPC content into the canonical pointer form
+for paths already using LFS. The metadata cache retains pointer identity, so
+status comparison does not download LFS workbook bytes. Commit sync baselines
+record the pointer blob hash. Current/historical restores resolve pointers to
+workbook bytes, checking declared size and SHA-256 before writing to BPC. Mixed
+ordinary Git and LFS histories are supported. Canonical v1 pointers only;
+malformed, extended and oversized pointers produce explicit errors.
+
+The Bitbucket raw-source API redirects LFS files to media storage. Selected-file
+reads encountering that redirect fall back to the actual pointer in the pinned
+Git head, rejecting a changed head or a redirect without an LFS pointer. They
+then use the same verified LFS download. History metadata continues using the
+Bitbucket API. EPM cell diffs remain outside scope.
+
+Batch requests use the existing request-local Basic Git credentials against
+Bitbucket's repository LFS endpoint. Storage actions use only server-supplied
+headers; repository credentials are never forwarded to storage URLs. HTTPS is
+required; redirects are disabled. Tokens, action URLs, response bodies and file
+bytes are not persisted in SAP caches/logs. Transfers are synchronous, bounded
+after receiving the response, with a 60-second HTTP timeout. SAP must trust and
+reach the LFS/storage hosts as well as bitbucket.org and api.bitbucket.org.
+Bitbucket token LFS permissions and storage quota also apply.
+
+References: [Git LFS batch protocol](https://github.com/git-lfs/git-lfs/blob/main/docs/api/batch.md),
+[pointer format](https://github.com/git-lfs/git-lfs/blob/main/docs/spec.md),
+[Bitbucket source API](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-source/).
