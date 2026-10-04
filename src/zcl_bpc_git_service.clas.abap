@@ -638,11 +638,35 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
 
   METHOD get_history.
     DATA(ls_config) = get_config( iv_environment ).
-    DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote
-      iv_kind = get_kind( iv_path ) iv_model = get_model( iv_path )
-      iv_dimension = zcl_bpc_git_members=>get_dimension( iv_path ) ).
-    IF NOT line_exists( ls_overview-workbooks[ path = iv_path ] ).
-      zcx_abapgit_exception=>raise( 'The selected item is no longer listed; reload the overview' ).
+    DATA(lv_kind) = get_kind( iv_path ).
+    DATA lt_parts TYPE string_table.
+    SPLIT iv_path AT '/' INTO TABLE lt_parts.
+    IF lv_kind IS INITIAL OR iv_path CS '\'.
+      zcx_abapgit_exception=>raise( 'Invalid tracked history path' ).
+    ENDIF.
+    LOOP AT lt_parts INTO DATA(lv_part).
+      IF lv_part IS INITIAL OR lv_part = '.' OR lv_part = '..'.
+        zcx_abapgit_exception=>raise( 'Invalid tracked history path' ).
+      ENDIF.
+    ENDLOOP.
+    " History reads Git only: authorize the scope without serializing BPC.
+    DATA(lt_models) = get_models( iv_environment ).
+    DATA(lv_model) = get_model( iv_path ).
+    IF lv_model IS NOT INITIAL AND NOT line_exists( lt_models[ table_line = lv_model ] ).
+      RAISE EXCEPTION TYPE cx_uj_no_auth.
+    ENDIF.
+    IF iv_path CP 'SECURITY/*' AND zcl_bpc_git_security=>can_read( ) = abap_false.
+      RAISE EXCEPTION TYPE cx_uj_no_auth.
+    ENDIF.
+    IF lv_kind = c_kind-bpf AND zcl_bpc_git_bpf=>can_read( ) = abap_false.
+      RAISE EXCEPTION TYPE cx_uj_no_auth.
+    ENDIF.
+    IF lv_kind = c_kind-dimmember.
+      DATA(lt_dimensions) = zcl_bpc_git_members=>dimensions( iv_environment ).
+      DATA(lv_dimension) = zcl_bpc_git_members=>get_dimension( iv_path ).
+      IF NOT line_exists( lt_dimensions[ table_line = lv_dimension ] ).
+        RAISE EXCEPTION TYPE cx_uj_no_auth.
+      ENDIF.
     ENDIF.
     rs_history = io_remote->history( iv_branch = ls_config-branch it_paths = history_paths( iv_path ) iv_depth = iv_depth ).
   ENDMETHOD.

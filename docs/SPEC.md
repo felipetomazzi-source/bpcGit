@@ -323,9 +323,25 @@ be restored. Deletion commits are shown and warn that restoring that snapshot
 deletes the item in BPC.
 
 History follows the configured branch's first-parent chain (merge commits show
-the changes introduced into that branch). It fetches the latest 100 branch
-commits initially; **Load older history** increases the range by 100 up to
+the changes introduced into that branch). It fetches the latest 20 branch
+commits initially; **Load older history** increases the range by 20 up to
 1,000. The UI says when older history remains or the limit has been reached.
+Version 0.15.4 authorizes the selected tracked path directly (environment,
+model and security/BPF/dimension read permissions), without a BPC status scan
+or a preliminary Git branch-content pull. History uses abapGit's raw upload-pack
+objects and traverses only the selected path(s); it does not materialize a full
+branch file list. Authorized paths absent from Git return empty history, and
+paths deleted at the current head can still show older changes.
+
+Computed history results are cached in INDX shared buffer area BH, keyed by
+SAP client/user, Git user, repository, branch, path set, depth and cache format.
+Every request checks current remote authorization/head before cache reuse;
+head changes and eviction force a fresh fetch. Only result metadata is cached,
+not tokens, file contents or Git objects. A cold request still downloads the
+Git pack for the requested branch depth, including blobs: this is not a
+server-side single-file fetch. Restore continues to revalidate current BPC
+status and expected head before applying a selected version.
+
 File renames are treated as separate paths. The shallow boundary is not shown
 as a file change unless its parent was fetched and compared, or it is the
 repository's actual root commit.

@@ -7,6 +7,16 @@ its reason.
 
 ## Current update (2026-10-03)
 
+0.15.4 reduces History overhead: direct scope authorization replaces the BPC
+status overview; raw abapGit upload-pack avoids materializing all branch files.
+History results use a head-checked, user/repository/path/depth scoped shared
+buffer cache (BH). UI opens 20 branch commits and expands by 20 up to 1,000.
+Cold pack downloads still contain blobs; no measured live speedup is claimed.
+Restore status validation is unchanged. Formatter and history/diff/scope/login
+regressions pass, including history restore depth and the 1,000-commit limit.
+ADT syntax passed for remote (no warnings) and service (30 existing ABAP Doc
+warnings), with no errors. Awaiting user pull/activation and browser timing.
+
 0.15.3 imports credentials from pasted HTTPS repository URLs into the existing
 tab-session login, clearing credentials from the URL before configuration Save.
 URL input change also performs the import; long pasted tokens are not truncated.

@@ -298,8 +298,30 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     IF iv_depth < 1 OR iv_depth > 1000.
       zcx_abapgit_exception=>raise( 'History depth must be between 1 and 1000' ).
     ENDIF.
-    DATA(ls_pull) = zcl_abapgit_git_porcelain=>pull_by_branch(
-      iv_url = mv_url iv_branch_name = c_heads && iv_branch iv_deepen_level = iv_depth + 1 ).
+    " Recheck remote authorization/head even when a history result is cached.
+    DATA(lt_branches) = zcl_abapgit_git_transport=>branches( mv_url )->get_branches_only( ).
+    DATA(lv_ref) = c_heads && iv_branch.
+    READ TABLE lt_branches INTO DATA(ls_branch) WITH KEY name_key COMPONENTS name = lv_ref.
+    IF sy-subrc <> 0.
+      zcx_abapgit_exception=>raise( 'History branch does not exist' ).
+    ENDIF.
+    DATA lv_cache_key TYPE c LENGTH 40.
+    lv_cache_key = blob_sha1( cl_abap_codepage=>convert_to(
+      |history-v1/{ sy-mandt }/{ sy-uname }/{ mv_cache_user }/{ mv_url }/{ lv_ref }/{ iv_depth }| &&
+      concat_lines_of( table = it_paths sep = cl_abap_char_utilities=>newline ) ) ).
+    TRY.
+        IMPORT history = rs_history FROM SHARED BUFFER indx(bh) ID lv_cache_key.
+        IF sy-subrc = 0 AND rs_history-head = to_lower( ls_branch-sha1 ).
+          RETURN.
+        ENDIF.
+      CATCH cx_sy_import_mismatch_error.
+    ENDTRY.
+    CLEAR rs_history.
+    " History needs commits and trees, not a materialized branch file list.
+    DATA ls_pull TYPE zcl_abapgit_git_porcelain=>ty_pull_result.
+    zcl_abapgit_git_transport=>upload_pack_by_branch(
+      EXPORTING iv_url = mv_url iv_branch_name = lv_ref iv_deepen_level = iv_depth + 1
+      IMPORTING et_objects = ls_pull-objects ev_branch = ls_pull-commit ).
     rs_history-head = to_lower( ls_pull-commit ).
     DATA(lv_commit) = ls_pull-commit.
     DATA lv_scanned TYPE i.
@@ -354,6 +376,7 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     IF lv_commit IS NOT INITIAL.
       rs_history-truncated = abap_true.
     ENDIF.
+    EXPORT history = rs_history TO SHARED BUFFER indx(bh) ID lv_cache_key.
   ENDMETHOD.
 
   METHOD read_version.

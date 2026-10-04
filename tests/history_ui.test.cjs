@@ -72,6 +72,7 @@ function fixture(response) {
   await tick();
   assert.equal(f.calls[0].resource, 'history');
   assert.equal(f.calls[0].params.path, f.row.path);
+  assert.equal(f.calls[0].params.depth, 20, 'initial history fetch is bounded to 20 branch commits');
   const list = controls.find(function (c) { return c.settings.mode === 'SingleSelectLeft'; });
   const restore = controls.find(function (c) { return c.settings.text === 'Restore selected version'; });
   const older = controls.find(function (c) { return c.settings.text === 'Load older history'; });
@@ -86,6 +87,7 @@ function fixture(response) {
   await tick();
   assert.equal(f.calls[1].resource, 'restore');
   assert.equal(f.calls[1].params.version, version.commit);
+  assert.equal(f.calls[1].params.depth, 20, 'restore validates the displayed history range');
   assert.equal(f.calls[1].params.commit, 'b'.repeat(40), 'freshness uses current head, not historical commit');
   assert.equal(f.calls[1].params.paths, f.row.path, 'backend receives the logical workbook path');
   assert.equal(f.instance.reloaded, true);
@@ -100,7 +102,10 @@ function fixture(response) {
   assert.equal(f.calls.length, 1);
   const more = controls.find(function (c) { return c.settings.text === 'Load older history'; });
   more.settings.press(); await tick();
-  assert.equal(f.calls[1].params.depth, 200);
+  assert.equal(f.calls[1].params.depth, 40);
+  for (let i = 0; i < 48; i++) { more.settings.press(); await tick(); }
+  assert.equal(f.calls[f.calls.length - 1].params.depth, 1000);
+  assert.equal(more.visible, false, 'older history stops at the supported depth limit');
 
   f = fixture({ head: 'b'.repeat(40), truncated: false, versions: [Object.assign({}, version, { present: false })] });
   f.instance.onHistory(); await tick();
