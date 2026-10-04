@@ -7,6 +7,11 @@ its reason.
 
 ## Current update (2026-10-03)
 
+0.15.6 exposes SAP's HTTP connection error code/message before closing the
+client. The current token is redacted. Formatter, History UI regression and
+ADT main-source syntax checks pass. User pull/activation and a retry are needed
+to identify the actual TLS/network failure.
+
 0.15.5 addresses continued Bitbucket History latency in deployed 0.15.4:
 Bitbucket Cloud URLs now use GET metadata APIs (commit headers, path-filtered
 first-parent diffstat, and pinned-head file presence), avoiding Git pack/blob

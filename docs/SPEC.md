@@ -819,3 +819,9 @@ made through ADT. Activation and native write acceptance remain the user's steps
 5. Test schema/path/language mismatch, invalid references, locked dimension,
    oversized property and deletion snapshots. Failures must not record success or
    remove members. Transaction data must remain unchanged.
+
+## Bitbucket transport diagnostics (0.15.6)
+
+History shows SAP's HTTP last-error code and message on transport failures,
+retrieved before closing the client. The current token is redacted from the
+message. A transport failure alone does not establish a certificate issue.

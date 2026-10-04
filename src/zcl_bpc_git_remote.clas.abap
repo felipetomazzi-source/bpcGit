@@ -438,8 +438,15 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
         lo_client->receive( EXCEPTIONS OTHERS = 1 ).
       ENDIF.
       IF sy-subrc <> 0.
+        DATA lv_error_code TYPE i.
+        DATA lv_error_message TYPE string.
+        lo_client->get_last_error( IMPORTING code = lv_error_code message = lv_error_message ).
         lo_client->close( ).
-        zcx_abapgit_exception=>raise( 'Bitbucket history API connection failed; check SAP HTTPS access to api.bitbucket.org' ).
+        IF mv_token IS NOT INITIAL.
+          REPLACE ALL OCCURRENCES OF mv_token IN lv_error_message WITH '[redacted]'.
+        ENDIF.
+        zcx_abapgit_exception=>raise(
+          |Bitbucket API connection failed (SAP { lv_error_code }): { lv_error_message }. Check HTTPS access to api.bitbucket.org| ).
       ENDIF.
       DATA lv_status TYPE i.
       lo_client->response->get_status( IMPORTING code = lv_status ).
