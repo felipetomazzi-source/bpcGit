@@ -711,7 +711,11 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     DATA lv_cache_key TYPE c LENGTH 40.
     lv_cache_key = blob_sha1( cl_abap_codepage=>convert_to(
       |{ sy-mandt }/{ sy-uname }/{ mv_cache_user }/{ mv_url }/{ mv_branch_ref }| ) ).
-    EXPORT metadata = ls_metadata TO SHARED BUFFER indx(bg) ID lv_cache_key.
+    TRY.
+        EXPORT metadata = ls_metadata TO SHARED BUFFER indx(bg) ID lv_cache_key.
+      CATCH cx_root.
+        " Best-effort cache: never hide a successful push or skip sync state.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD check_push_access.

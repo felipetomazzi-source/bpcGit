@@ -15,7 +15,13 @@ Commit still pulls fresh Git content; generated BPC listing/serialization and
 post-action BPC refresh remain scoped but may be expensive. No custom Git writer,
 REST push or history rewrite is introduced. Formatter and Diff/history/scope/
 login UI checks pass. ADT is still failing HTTP 400; SAP validation/deployment
-results will be recorded after the authorized Playwright abapGit pull.
+results: Playwright pulled/activated the remote/service/BSP changes through
+abapGit and repository reported zero local/remote changes. Running app shows
+0.15.8 and API Connected; configured CH_PLANNING Bitbucket repo is unchanged.
+No BPC content was committed for testing; the new browser has no Git login,
+so actual commit timings remain unmeasured. ADT checks are still blocked by
+HTTP 400. A follow-up makes post-push cache export best effort so cache errors
+cannot prevent recording successful push sync state.
 
 0.15.7 removes Diff's full status comparison. BPC listing still covers the
 selected kind/model (generated providers still serialize that scope). Bitbucket
