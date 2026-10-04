@@ -1,5 +1,17 @@
 # bpcGit: functional specification (v0.1, draft)
 
+## Repository URL login import (0.15.3)
+
+The setup URL field accepts pasted HTTPS URLs containing `user:token@host`.
+On field change and again before Save, the UI removes the credentials from the
+URL and imports them through the existing tab-session login mechanism. Only the
+clean repository address is sent in the configuration request and saved in SAP.
+Percent-encoded credentials are decoded; token colons and equals signs are
+preserved. Missing or malformed credentials are removed and a message directs
+the user to Log in. The input permits long tokens without truncating them;
+the saved repository address remains subject to the existing backend limits.
+This does not validate the token; Test connection still checks Git access.
+
 ## Text diff (0.15.0)
 
 Select one logic script, transformation, conversion or Data Manager package and choose Diff. The

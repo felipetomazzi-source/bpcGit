@@ -7,6 +7,13 @@ its reason.
 
 ## Current update (2026-10-03)
 
+0.15.3 imports credentials from pasted HTTPS repository URLs into the existing
+tab-session login, clearing credentials from the URL before configuration Save.
+URL input change also performs the import; long pasted tokens are not truncated.
+Login-import tests cover encoding, long tokens, token punctuation, clean URLs,
+and malformed/missing credentials. Formatter and Diff/scope/history checks pass.
+Frontend-only change; awaiting user abapGit pull/activation and browser check.
+
 0.15.2 extends Diff to Data Manager package links using the existing generated
 link XML, model access checks and escaped line-by-line renderer.
 Formatter and Diff/scope/history regressions pass. ADT syntax check reports no
