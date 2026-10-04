@@ -186,7 +186,9 @@ CLASS zcl_bpc_git_lfs IMPLEMENTATION.
     lo_client->propertytype_logon_popup = if_http_client=>co_disabled.
     lo_client->propertytype_redirect = if_http_client=>co_disabled.
     lo_client->request->set_method( iv_method ).
-    lo_client->request->set_header_field( name = 'Accept' value = 'application/vnd.git-lfs+json' ).
+    lo_client->request->set_header_field( name = 'Accept' value = COND string(
+      WHEN iv_method = 'GET' THEN 'application/octet-stream'
+      WHEN iv_method = 'PUT' THEN '*/*' ELSE 'application/vnd.git-lfs+json' ) ).
     IF iv_batch = abap_true OR iv_method = 'POST'.
       lo_client->request->set_content_type( 'application/vnd.git-lfs+json' ).
     ELSEIF iv_method = 'PUT'.
@@ -231,6 +233,10 @@ CLASS zcl_bpc_git_lfs IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD batch.
+    IF strlen( is_pointer-oid ) <> 64 OR is_pointer-oid CN '0123456789abcdef'
+        OR is_pointer-size < 0 OR is_pointer-size > c_max_bytes.
+      zcx_abapgit_exception=>raise( 'Invalid or oversized Git LFS object identity' ).
+    ENDIF.
     DATA(lv_json) = |\{"operation":"{ iv_operation }","transfers":["basic"],"objects":[| &&
       |\{"oid":"{ is_pointer-oid }","size":{ is_pointer-size NUMBER = RAW }\}]\}|.
     DATA(lv_reply) = request( is_action = VALUE #( href = mv_endpoint ) iv_method = 'POST'
@@ -248,7 +254,8 @@ CLASS zcl_bpc_git_lfs IMPLEMENTATION.
       zcx_abapgit_exception=>raise( 'Invalid or unsupported Git LFS batch response' ).
     ENDIF.
     rs_object = ls_reply-objects[ 1 ].
-    IF rs_object-oid <> is_pointer-oid OR rs_object-size <> is_pointer-size OR rs_object-error-code <> 0.
+    IF rs_object-oid <> is_pointer-oid OR rs_object-size <> is_pointer-size
+        OR rs_object-error-code <> 0 OR rs_object-error-message IS NOT INITIAL.
       zcx_abapgit_exception=>raise( |Git LFS object unavailable (code { rs_object-error-code }); check permissions and storage quota| ).
     ENDIF.
   ENDMETHOD.
