@@ -346,6 +346,28 @@ File renames are treated as separate paths. The shallow boundary is not shown
 as a file change unless its parent was fetched and compared, or it is the
 repository's actual root commit.
 
+Version 0.15.5 uses Bitbucket Cloud's metadata API for URLs on bitbucket.org.
+After verifying current Git authorization/head, it batches recent commit headers
+and follows first parents explicitly. Per-path diffstat compares each commit
+to its first parent with rename detection disabled. File presence is read once
+at the pinned head using `format=meta`, then propagated backwards from old/new
+path metadata to determine deletion and paired completeness at each change.
+Root commits are handled from presence without requesting a nonexistent parent.
+Paths and API results are validated, and unexpected diffstat pagination is an
+error rather than incomplete history. No workbook/file blobs are downloaded by
+Bitbucket History; other hosts retain the generic abapGit history implementation.
+
+This requires outbound SAP HTTPS/trust for api.bitbucket.org and API repository
+read access. x-token-auth access tokens use Bearer; other users use Basic auth
+(Atlassian API tokens require the Atlassian email as API user). HTTP errors are
+reported explicitly; there is no slow automatic Git-pack fallback. Requests
+have a 30-second timeout, disable redirects and limit each reply to 1 MB.
+Pinned immutable metadata replies (including confirmed absent files) are cached
+in shared buffer BI, scoped to client/SAP user/Git user/repository/request URL.
+This complements the head-checked history result cache; each history call still
+rechecks Git access before metadata reuse. Tokens and error replies are never
+cached. Commit/restore content transfer continues through abapGit.
+
 Choose a complete version and **Restore selected version**, then confirm.
 The backend verifies that the version belongs to the displayed history and
 that the branch head still matches the head seen when history was loaded.

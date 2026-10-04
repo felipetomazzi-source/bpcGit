@@ -120,6 +120,14 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_heads TYPE string VALUE 'refs/heads/' ##NO_TEXT.
     DATA mv_url TYPE string.
     DATA mv_cache_user TYPE string.
+    DATA mv_token TYPE string.
+    DATA mv_bitbucket_api TYPE string.
+    METHODS bitbucket_get
+      IMPORTING iv_suffix TYPE string iv_allow_missing TYPE abap_bool DEFAULT abap_false
+      RETURNING VALUE(rv_json) TYPE string RAISING zcx_abapgit_exception.
+    METHODS bitbucket_history
+      IMPORTING iv_head TYPE string it_paths TYPE string_table iv_depth TYPE i
+      RETURNING VALUE(rs_history) TYPE ty_history RAISING zcx_abapgit_exception.
     DATA mv_has_credentials TYPE abap_bool.
     "! Head read by read_branch: branch ref, commit, files and Git objects
     DATA mv_branch_ref TYPE string.
@@ -175,6 +183,15 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
   METHOD constructor.
     mv_url = iv_url.
     mv_cache_user = iv_user.
+    mv_token = iv_token.
+    DATA lv_workspace TYPE string.
+    DATA lv_repository TYPE string.
+    FIND REGEX '^https://bitbucket[.]org/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/?$'
+      IN mv_url SUBMATCHES lv_workspace lv_repository.
+    IF sy-subrc = 0.
+      REPLACE REGEX '[.]git$' IN lv_repository WITH ''.
+      mv_bitbucket_api = |https://api.bitbucket.org/2.0/repositories/{ lv_workspace }/{ lv_repository }|.
+    ENDIF.
     zcl_abapgit_login_manager=>clear( ).
     IF iv_user IS NOT INITIAL AND iv_token IS NOT INITIAL.
       zcl_abapgit_login_manager=>set_basic( iv_uri = mv_url
@@ -307,7 +324,7 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     ENDIF.
     DATA lv_cache_key TYPE c LENGTH 40.
     lv_cache_key = blob_sha1( cl_abap_codepage=>convert_to(
-      |history-v1/{ sy-mandt }/{ sy-uname }/{ mv_cache_user }/{ mv_url }/{ lv_ref }/{ iv_depth }| &&
+      |history-v2/{ sy-mandt }/{ sy-uname }/{ mv_cache_user }/{ mv_url }/{ lv_ref }/{ iv_depth }| &&
       concat_lines_of( table = it_paths sep = cl_abap_char_utilities=>newline ) ) ).
     TRY.
         IMPORT history = rs_history FROM SHARED BUFFER indx(bh) ID lv_cache_key.
@@ -317,6 +334,11 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       CATCH cx_sy_import_mismatch_error.
     ENDTRY.
     CLEAR rs_history.
+    IF mv_bitbucket_api IS NOT INITIAL.
+      rs_history = bitbucket_history( iv_head = to_lower( ls_branch-sha1 ) it_paths = it_paths iv_depth = iv_depth ).
+      EXPORT history = rs_history TO SHARED BUFFER indx(bh) ID lv_cache_key.
+      RETURN.
+    ENDIF.
     " History needs commits and trees, not a materialized branch file list.
     DATA ls_pull TYPE zcl_abapgit_git_porcelain=>ty_pull_result.
     zcl_abapgit_git_transport=>upload_pack_by_branch(
@@ -377,6 +399,187 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       rs_history-truncated = abap_true.
     ENDIF.
     EXPORT history = rs_history TO SHARED BUFFER indx(bh) ID lv_cache_key.
+  ENDMETHOD.
+
+  METHOD bitbucket_get.
+    TEST-SEAM bitbucket_http.
+      " These private calls use pinned commit hashes; history rechecks Git access.
+      DATA lv_cache_key TYPE c LENGTH 40.
+      lv_cache_key = blob_sha1( cl_abap_codepage=>convert_to(
+        |bitbucket-meta-v1/{ sy-mandt }/{ sy-uname }/{ mv_cache_user }/{ mv_bitbucket_api }/{ iv_suffix }| ) ).
+      TRY.
+          IMPORT metadata = rv_json FROM SHARED BUFFER indx(bi) ID lv_cache_key.
+          IF sy-subrc = 0.
+            RETURN.
+          ENDIF.
+        CATCH cx_sy_import_mismatch_error.
+          CLEAR rv_json.
+      ENDTRY.
+      " The host is constructed locally; credentials never follow API links.
+      DATA lo_client TYPE REF TO if_http_client.
+      cl_http_client=>create_by_url( EXPORTING url = mv_bitbucket_api && iv_suffix
+        IMPORTING client = lo_client EXCEPTIONS OTHERS = 1 ).
+      IF sy-subrc <> 0.
+        zcx_abapgit_exception=>raise( 'Cannot connect to api.bitbucket.org; check SAP HTTPS configuration' ).
+      ENDIF.
+      lo_client->propertytype_logon_popup = if_http_client=>co_disabled.
+      lo_client->propertytype_redirect = if_http_client=>co_disabled.
+      lo_client->request->set_method( 'GET' ).
+      lo_client->request->set_header_field( name = 'Accept' value = 'application/json' ).
+      IF mv_has_credentials = abap_true.
+        IF mv_cache_user = 'x-token-auth'.
+          lo_client->request->set_header_field( name = 'Authorization' value = |Bearer { mv_token }| ).
+        ELSE.
+          lo_client->authenticate( username = mv_cache_user password = mv_token ).
+        ENDIF.
+      ENDIF.
+      lo_client->send( EXPORTING timeout = 30 EXCEPTIONS OTHERS = 1 ).
+      IF sy-subrc = 0.
+        lo_client->receive( EXCEPTIONS OTHERS = 1 ).
+      ENDIF.
+      IF sy-subrc <> 0.
+        lo_client->close( ).
+        zcx_abapgit_exception=>raise( 'Bitbucket history API connection failed; check SAP HTTPS access to api.bitbucket.org' ).
+      ENDIF.
+      DATA lv_status TYPE i.
+      lo_client->response->get_status( IMPORTING code = lv_status ).
+      rv_json = lo_client->response->get_cdata( ).
+      lo_client->close( ).
+      IF lv_status = 404 AND iv_allow_missing = abap_true.
+        CLEAR rv_json.
+        EXPORT metadata = rv_json TO SHARED BUFFER indx(bi) ID lv_cache_key.
+        RETURN.
+      ENDIF.
+      IF lv_status = 401.
+        zcx_abapgit_exception=>raise( 'Unauthorized Bitbucket history API access. Use a repository access token with x-token-auth, or an API token with your Atlassian email as the user' ).
+      ENDIF.
+      IF lv_status <> 200.
+        zcx_abapgit_exception=>raise( |Bitbucket history API returned HTTP { lv_status }; check API repository read permission and SAP connectivity| ).
+      ENDIF.
+      IF strlen( rv_json ) > 1048576.
+        zcx_abapgit_exception=>raise( 'Bitbucket history metadata exceeds the 1 MB response limit' ).
+      ENDIF.
+      EXPORT metadata = rv_json TO SHARED BUFFER indx(bi) ID lv_cache_key.
+    END-TEST-SEAM.
+  ENDMETHOD.
+
+  METHOD bitbucket_history.
+    TYPES: BEGIN OF ty_parent,
+             hash TYPE string,
+           END OF ty_parent,
+           ty_parents TYPE STANDARD TABLE OF ty_parent WITH DEFAULT KEY,
+           BEGIN OF ty_author,
+             raw TYPE string,
+           END OF ty_author,
+           BEGIN OF ty_commit,
+             hash TYPE string,
+             message TYPE string,
+             date TYPE string,
+             author TYPE ty_author,
+             parents TYPE ty_parents,
+           END OF ty_commit,
+           ty_commits TYPE STANDARD TABLE OF ty_commit WITH DEFAULT KEY,
+           BEGIN OF ty_commit_page,
+             values TYPE ty_commits,
+           END OF ty_commit_page,
+           BEGIN OF ty_file,
+             path TYPE string,
+             type TYPE string,
+           END OF ty_file,
+           BEGIN OF ty_change,
+             status TYPE string,
+             old TYPE ty_file,
+             new TYPE ty_file,
+           END OF ty_change,
+           ty_changes TYPE STANDARD TABLE OF ty_change WITH DEFAULT KEY,
+           BEGIN OF ty_diff,
+             values TYPE ty_changes,
+             next TYPE string,
+           END OF ty_diff,
+           BEGIN OF ty_presence,
+             path TYPE string,
+             present TYPE abap_bool,
+           END OF ty_presence,
+           ty_presences TYPE SORTED TABLE OF ty_presence WITH UNIQUE KEY path.
+    DATA lt_present TYPE ty_presences.
+    rs_history-head = iv_head.
+    " Get presence once at the pinned head, then walk change metadata backwards.
+    LOOP AT it_paths INTO DATA(lv_path).
+      DATA(lv_json) = bitbucket_get( iv_suffix = |/src/{ iv_head }/{ cl_http_utility=>escape_url( lv_path ) }?format=meta|
+        iv_allow_missing = abap_true ).
+      DATA ls_meta TYPE ty_file.
+      CLEAR ls_meta.
+      IF lv_json IS NOT INITIAL.
+        /ui2/cl_json=>deserialize( EXPORTING json = lv_json CHANGING data = ls_meta ).
+        IF ls_meta-type <> 'commit_file' OR ls_meta-path <> lv_path.
+          zcx_abapgit_exception=>raise( 'Invalid Bitbucket history file metadata' ).
+        ENDIF.
+      ENDIF.
+      INSERT VALUE #( path = lv_path present = xsdbool( lv_json IS NOT INITIAL ) ) INTO TABLE lt_present.
+    ENDLOOP.
+    " Batch recent commit headers; follow first parents locally, not API ordering.
+    lv_json = bitbucket_get( |/commits/{ iv_head }?pagelen=100&fields=values.hash,values.message,values.date,values.author.raw,values.parents.hash| ).
+    DATA ls_commits TYPE ty_commit_page.
+    /ui2/cl_json=>deserialize( EXPORTING json = lv_json CHANGING data = ls_commits ).
+    DATA(lv_hash) = iv_head.
+    DO iv_depth TIMES.
+      IF strlen( lv_hash ) <> 40 OR lv_hash CN '0123456789abcdef'.
+        zcx_abapgit_exception=>raise( 'Invalid Bitbucket history commit' ).
+      ENDIF.
+      DATA ls_commit TYPE ty_commit.
+      CLEAR ls_commit.
+      READ TABLE ls_commits-values INTO ls_commit WITH KEY hash = lv_hash.
+      IF sy-subrc <> 0.
+        lv_json = bitbucket_get( |/commit/{ lv_hash }| ).
+        /ui2/cl_json=>deserialize( EXPORTING json = lv_json CHANGING data = ls_commit ).
+      ENDIF.
+      IF ls_commit-hash <> lv_hash.
+        zcx_abapgit_exception=>raise( 'Incomplete Bitbucket history commit metadata' ).
+      ENDIF.
+      DATA lv_changed TYPE abap_bool.
+      DATA lv_count TYPE i.
+      CLEAR: lv_changed, lv_count.
+      LOOP AT lt_present INTO DATA(ls_present) WHERE present = abap_true.
+        lv_count = lv_count + 1.
+      ENDLOOP.
+      DATA(lv_present) = xsdbool( lv_count > 0 ).
+      DATA(lv_complete) = xsdbool( lv_count = 0 OR lv_count = lines( it_paths ) ).
+      IF ls_commit-parents IS INITIAL.
+        lv_changed = lv_present.
+      ELSE.
+        LOOP AT it_paths INTO lv_path.
+          lv_json = bitbucket_get( |/diffstat/{ lv_hash }?path={ cl_http_utility=>escape_url( lv_path ) }&renames=false&pagelen=100| ).
+          DATA ls_diff TYPE ty_diff.
+          CLEAR ls_diff.
+          /ui2/cl_json=>deserialize( EXPORTING json = lv_json CHANGING data = ls_diff ).
+          " A file filter should fit one page; never silently lose changes.
+          IF lv_json NS '"values"'.
+            zcx_abapgit_exception=>raise( 'Invalid Bitbucket history diff metadata' ).
+          ENDIF.
+          IF ls_diff-next IS NOT INITIAL.
+            zcx_abapgit_exception=>raise( 'Bitbucket returned an incomplete filtered history diff' ).
+          ENDIF.
+          LOOP AT ls_diff-values INTO DATA(ls_change).
+            IF ls_change-old-path <> lv_path AND ls_change-new-path <> lv_path.
+              CONTINUE.
+            ENDIF.
+            lv_changed = abap_true.
+            READ TABLE lt_present ASSIGNING FIELD-SYMBOL(<ls_present>) WITH TABLE KEY path = lv_path.
+            <ls_present>-present = xsdbool( ls_change-old-path = lv_path AND ls_change-old-type = 'commit_file' ).
+          ENDLOOP.
+        ENDLOOP.
+      ENDIF.
+      IF lv_changed = abap_true.
+        APPEND VALUE #( commit = lv_hash author = ls_commit-author-raw date = ls_commit-date
+          message = ls_commit-message present = lv_present complete = lv_complete ) TO rs_history-versions.
+      ENDIF.
+      IF ls_commit-parents IS INITIAL.
+        CLEAR lv_hash.
+        EXIT.
+      ENDIF.
+      lv_hash = to_lower( ls_commit-parents[ 1 ]-hash ).
+    ENDDO.
+    rs_history-truncated = xsdbool( lv_hash IS NOT INITIAL ).
   ENDMETHOD.
 
   METHOD read_version.

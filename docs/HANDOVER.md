@@ -7,6 +7,25 @@ its reason.
 
 ## Current update (2026-10-03)
 
+0.15.5 addresses continued Bitbucket History latency in deployed 0.15.4:
+Bitbucket Cloud URLs now use GET metadata APIs (commit headers, path-filtered
+first-parent diffstat, and pinned-head file presence), avoiding Git pack/blob
+downloads for history. Other hosts retain abapGit history. Existing Git head,
+SAP authorization, paired completeness and restore validations remain.
+Bitbucket REST uses bearer auth for x-token-auth, otherwise Basic auth; API
+tokens require the Atlassian email user. SAP must trust/reach api.bitbucket.org.
+API errors are explicit, with no silent fallback to a slow pack download.
+Immutable API metadata also uses a user/repository/URL scoped BI shared buffer,
+so extending history does not repeat cached requests; branch Git access is
+checked first. Redirects are disabled, replies bounded to 1 MB, HTTP timeout
+30 seconds. Response bodies containing credentials/errors are never cached.
+Formatter and history/diff/scope/login regressions pass; ADT main-source syntax
+passed with no errors/warnings. Public atlassian/aui commit-header and filtered
+diffstat endpoint smoke checks passed. New ABAP fixture tests cover incomplete
+and deleted pairs, root/first-parent semantics, depth and partial-page refusal;
+they await activation and execution in SAP. Private-repository API permission,
+SAP TLS and performance verification remain for the user's pull/browser test.
+
 0.15.4 reduces History overhead: direct scope authorization replaces the BPC
 status overview; raw abapGit upload-pack avoids materializing all branch files.
 History results use a head-checked, user/repository/path/depth scoped shared
