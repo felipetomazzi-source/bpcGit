@@ -102,6 +102,9 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING VALUE(rs_content) TYPE ty_branch_content
       RAISING zcx_abapgit_exception.
     "! Content of a file at the head that read_branch returned.
+    METHODS read_paths
+      IMPORTING iv_branch TYPE csequence it_paths TYPE string_table
+      RETURNING VALUE(rs_content) TYPE ty_branch_content RAISING zcx_abapgit_exception.
     METHODS get_content
       IMPORTING iv_path TYPE string
       RETURNING VALUE(rv_data) TYPE xstring
@@ -124,6 +127,8 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
     DATA mv_bitbucket_api TYPE string.
     METHODS bitbucket_get
       IMPORTING iv_suffix TYPE string iv_allow_missing TYPE abap_bool DEFAULT abap_false
+        iv_binary TYPE abap_bool DEFAULT abap_false
+      EXPORTING ev_content TYPE xstring ev_missing TYPE abap_bool
       RETURNING VALUE(rv_json) TYPE string RAISING zcx_abapgit_exception.
     METHODS bitbucket_history
       IMPORTING iv_head TYPE string it_paths TYPE string_table iv_depth TYPE i
@@ -407,6 +412,8 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       DATA lv_cache_key TYPE c LENGTH 40.
       lv_cache_key = blob_sha1( cl_abap_codepage=>convert_to(
         |bitbucket-meta-v1/{ sy-mandt }/{ sy-uname }/{ mv_cache_user }/{ mv_bitbucket_api }/{ iv_suffix }| ) ).
+      CLEAR: ev_content, ev_missing.
+      IF iv_binary = abap_false.
       TRY.
           IMPORT metadata = rv_json FROM SHARED BUFFER indx(bi) ID lv_cache_key.
           IF sy-subrc = 0.
@@ -415,6 +422,7 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
         CATCH cx_sy_import_mismatch_error.
           CLEAR rv_json.
       ENDTRY.
+      ENDIF.
       " The host is constructed locally; credentials never follow API links.
       DATA lo_client TYPE REF TO if_http_client.
       cl_http_client=>create_by_url( EXPORTING url = mv_bitbucket_api && iv_suffix
@@ -425,7 +433,8 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       lo_client->propertytype_logon_popup = if_http_client=>co_disabled.
       lo_client->propertytype_redirect = if_http_client=>co_disabled.
       lo_client->request->set_method( 'GET' ).
-      lo_client->request->set_header_field( name = 'Accept' value = 'application/json' ).
+      lo_client->request->set_header_field( name = 'Accept' value = COND string(
+        WHEN iv_binary = abap_true THEN 'application/octet-stream' ELSE 'application/json' ) ).
       IF mv_has_credentials = abap_true.
         IF mv_cache_user = 'x-token-auth'.
           lo_client->request->set_header_field( name = 'Authorization' value = |Bearer { mv_token }| ).
@@ -450,11 +459,18 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       ENDIF.
       DATA lv_status TYPE i.
       lo_client->response->get_status( IMPORTING code = lv_status ).
-      rv_json = lo_client->response->get_cdata( ).
+      IF iv_binary = abap_true.
+        ev_content = lo_client->response->get_data( ).
+      ELSE.
+        rv_json = lo_client->response->get_cdata( ).
+      ENDIF.
       lo_client->close( ).
       IF lv_status = 404 AND iv_allow_missing = abap_true.
-        CLEAR rv_json.
-        EXPORT metadata = rv_json TO SHARED BUFFER indx(bi) ID lv_cache_key.
+        CLEAR: rv_json, ev_content.
+        ev_missing = abap_true.
+        IF iv_binary = abap_false.
+          EXPORT metadata = rv_json TO SHARED BUFFER indx(bi) ID lv_cache_key.
+        ENDIF.
         RETURN.
       ENDIF.
       IF lv_status = 401.
@@ -466,7 +482,11 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       IF strlen( rv_json ) > 1048576.
         zcx_abapgit_exception=>raise( 'Bitbucket history metadata exceeds the 1 MB response limit' ).
       ENDIF.
-      EXPORT metadata = rv_json TO SHARED BUFFER indx(bi) ID lv_cache_key.
+      IF iv_binary = abap_false.
+        EXPORT metadata = rv_json TO SHARED BUFFER indx(bi) ID lv_cache_key.
+      ELSEIF xstrlen( ev_content ) > 16777216.
+        zcx_abapgit_exception=>raise( 'Selected Git file exceeds the 16 MB Diff limit' ).
+      ENDIF.
     END-TEST-SEAM.
   ENDMETHOD.
 
@@ -605,6 +625,36 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       INSERT VALUE #( path = lv_path sha1 = to_lower( ls_file-sha1 ) ) INTO TABLE rs_content-files.
     ENDLOOP.
     mt_pulled = ls_pull-files.
+  ENDMETHOD.
+
+  METHOD read_paths.
+    IF mv_bitbucket_api IS INITIAL.
+      rs_content = read_branch( iv_branch ).
+      RETURN.
+    ENDIF.
+    DATA(lv_ref) = c_heads && iv_branch.
+    DATA(lt_branches) = zcl_abapgit_git_transport=>branches( mv_url )->get_branches_only( ).
+    READ TABLE lt_branches INTO DATA(ls_branch) WITH KEY name_key COMPONENTS name = lv_ref.
+    CLEAR mt_pulled.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    rs_content-branch_found = abap_true.
+    rs_content-commit = to_lower( ls_branch-sha1 ).
+    LOOP AT it_paths INTO DATA(lv_path).
+      DATA lv_data TYPE xstring.
+      DATA lv_missing TYPE abap_bool.
+      bitbucket_get( EXPORTING iv_suffix = |/src/{ rs_content-commit }/{ cl_http_utility=>escape_url( lv_path ) }|
+        iv_allow_missing = abap_true iv_binary = abap_true
+        IMPORTING ev_content = lv_data ev_missing = lv_missing ).
+      IF lv_missing = abap_true.
+        CONTINUE.
+      ENDIF.
+      DATA(lv_sha1) = blob_sha1( lv_data ).
+      INSERT VALUE #( path = lv_path sha1 = lv_sha1 ) INTO TABLE rs_content-files.
+      APPEND VALUE #( path = |/{ substring_before( val = lv_path sub = '/' occ = -1 ) }/|
+        filename = substring_after( val = lv_path sub = '/' occ = -1 ) data = lv_data sha1 = lv_sha1 ) TO mt_pulled.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD get_content.

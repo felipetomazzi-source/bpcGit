@@ -7,6 +7,16 @@ its reason.
 
 ## Current update (2026-10-03)
 
+0.15.7 removes Diff's full status comparison. BPC listing still covers the
+selected kind/model (generated providers still serialize that scope). Bitbucket
+Diff now reads only selected path(s) at a freshly authorized, pinned Git head;
+other hosts retain full abapGit branch content. Raw binary GETs bypass metadata
+cache, distinguish empty/missing files and refuse redirects (including LFS),
+with a 16 MB selected-Git-file limit. No state/content mutation is performed.
+Formatter and Diff/history/scope/login UI regressions pass. ADT source read and
+syntax-check calls both fail HTTP 400, so SAP syntax validation is outstanding.
+User pull/activation and selected-file API/binary/latency verification pending.
+
 0.15.6 exposes SAP's HTTP connection error code/message before closing the
 client. The current token is redacted. Formatter, History UI regression and
 ADT main-source syntax checks pass. User pull/activation and a retry are needed

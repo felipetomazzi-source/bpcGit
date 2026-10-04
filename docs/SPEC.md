@@ -825,3 +825,14 @@ made through ADT. Activation and native write acceptance remain the user's steps
 History shows SAP's HTTP last-error code and message on transport failures,
 retrieved before closing the client. The current token is redacted from the
 message. A transport failure alone does not establish a certificate issue.
+
+## Targeted Diff loading (0.15.7)
+
+Diff reads BPC's selected type/model listing without comparing every row or
+loading sync state. Bitbucket reads only the selected file and companion paths
+through raw source GETs pinned to the freshly authorized branch head. Presence
+comes from HTTP status, preserving empty present files. Raw bytes bypass the
+metadata cache; redirects are refused and each Git file is limited to 16 MB.
+Existing text decoding/rendering limits and binary summaries apply. Other hosts
+retain abapGit branch reads. Generated BPC providers still serialize their
+scoped listing, so this change does not eliminate all BPC-side listing cost.

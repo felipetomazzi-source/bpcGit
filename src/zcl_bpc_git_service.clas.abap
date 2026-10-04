@@ -710,33 +710,33 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     IF lv_model IS INITIAL OR NOT line_exists( lt_models[ table_line = CONV uj_appl_id( lv_model ) ] ).
       RAISE EXCEPTION TYPE cx_uj_no_auth.
     ENDIF.
-    DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote
-      iv_individual = abap_true iv_kind = lv_kind iv_model = lv_model ).
-    IF NOT line_exists( ls_overview-workbooks[ path = iv_path ] ).
+    DATA(lt_bpc) = list_workbooks( iv_environment = iv_environment iv_kind = lv_kind iv_model = lv_model ).
+    DATA(lt_paths) = history_paths( iv_path ).
+    DATA(ls_config) = get_config( iv_environment ).
+    DATA(ls_branch) = io_remote->read_paths( iv_branch = ls_config-branch it_paths = lt_paths ).
+    IF NOT line_exists( lt_bpc[ path = iv_path ] ) AND NOT line_exists( ls_branch-files[ path = iv_path ] ).
       zcx_abapgit_exception=>raise( 'The selected item is no longer listed; reload the overview' ).
     ENDIF.
-    rs_diff-head = ls_overview-commit.
+    rs_diff-head = ls_branch-commit.
     DATA(lo_files) = get_file_service( iv_environment ).
-    LOOP AT history_paths( iv_path ) INTO DATA(lv_path).
+    LOOP AT lt_paths INTO DATA(lv_path).
       DATA(ls_part) = VALUE ty_diff_part( path = lv_path ).
       DATA lv_bpc TYPE xstring.
       DATA lv_git TYPE xstring.
       CLEAR: lv_bpc, lv_git.
-      READ TABLE ls_overview-workbooks INTO DATA(ls_file) WITH KEY path = lv_path.
-      IF sy-subrc = 0.
-        ls_part-in_bpc = ls_file-in_bpc.
-        ls_part-in_git = xsdbool( ls_file-git_sha1 IS NOT INITIAL ).
-        IF ls_part-in_bpc = abap_true.
-          IF ls_file-generated = abap_true.
-            lv_bpc = ls_file-content.
-          ELSE.
-            lo_files->get_document( EXPORTING i_docname = ls_file-docname i_retzip = abap_false
-              IMPORTING e_document_content = lv_bpc ).
-          ENDIF.
+      READ TABLE lt_bpc INTO DATA(ls_file) WITH KEY path = lv_path.
+      ls_part-in_bpc = xsdbool( sy-subrc = 0 ).
+      IF ls_part-in_bpc = abap_true.
+        IF ls_file-generated = abap_true.
+          lv_bpc = ls_file-content.
+        ELSE.
+          lo_files->get_document( EXPORTING i_docname = ls_file-docname i_retzip = abap_false
+            IMPORTING e_document_content = lv_bpc ).
         ENDIF.
-        IF ls_part-in_git = abap_true.
-          lv_git = io_remote->get_content( lv_path ).
-        ENDIF.
+      ENDIF.
+      ls_part-in_git = xsdbool( line_exists( ls_branch-files[ path = lv_path ] ) ).
+      IF ls_part-in_git = abap_true.
+        lv_git = io_remote->get_content( lv_path ).
       ENDIF.
       ls_part-bpc_size = xstrlen( lv_bpc ).
       ls_part-git_size = xstrlen( lv_git ).
