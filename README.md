@@ -1,14 +1,19 @@
 # bpcGit
 
-Select one logic script, transformation or conversion and click **Diff** to
-compare Git with current BPC text. Transformation/conversion workbooks include
-their companion definitions; Excel files show a binary change summary.
-
 Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
-package links, security definitions, BPF template designs and dimension members. The app is a UI5
-BSP application, installed with abapGit into
-package `ZBPC_GIT` on the development system.
+package links, security definitions, BPF template designs and dimension members.
+The app is a UI5 BSP application, installed with abapGit into package `ZBPC_GIT`.
+Current version: **0.16.0**. Target runtime: ABAP 7.52 and UI5 1.52.
+
+Choose an object type and optional model, then **Load**. Select objects to
+commit, restore or inspect their history. EPM reports and input schedules have
+separate load choices; **All objects** is available when you need the full scope.
+
+Select one logic script, transformation, conversion, Data Manager package or
+package link and choose **Diff** to compare Git with current BPC text/XML.
+Transformation/conversion workbooks include their companion definitions;
+their Excel content shows a binary change summary, rather than a cell diff.
 
 - Specification: [docs/SPEC.md](docs/SPEC.md)
 - abapGit objects: `src/`
@@ -19,6 +24,64 @@ After pulling with abapGit, the app runs at
 `/sap/bc/ui5_ui5/sap/zbpc_git/index.html?sap-client=<client>`.
 Use this UI5 path, not `/sap/bc/bsp/sap/...`: the BSP runtime rejects host
 names without a domain (`CX_FQDN`), such as `vhcalnplci`.
+
+## Repository setup and login
+
+Expand **Repository setup**, select a BPC environment, enter the HTTPS repository
+URL and branch, then **Save** and **Test connection**. Regular Git access uses
+abapGit; Bitbucket Cloud also has dedicated History and Diff API reads. Other
+Git hosts retain the abapGit read path.
+
+Use **Log in** for your Git username and token. Pasting a URL containing
+`user:token@host` imports that login into the current tab and removes the
+credentials from the saved URL. Prefer a clean URL such as
+`https://bitbucket.org/<workspace>/<repository>.git`. For a Bitbucket repository
+access token, use `x-token-auth` as the username; for a Bitbucket API token, use
+your Atlassian account email. Tokens need the relevant repository/API permissions.
+
+SAP HTTPS configuration must support SNI and trust the Git/API hosts. Bitbucket
+History and Diff require access to `api.bitbucket.org` in addition to
+`bitbucket.org`. Connection failures display SAP's HTTP/TLS diagnostic details.
+
+## Large EPM workbooks with Git LFS
+
+Git LFS is optional and currently supports **Bitbucket Cloud** only:
+
+1. Expand **Repository setup** in bpcGit.
+2. Check **Use Git LFS (Bitbucket Cloud)**.
+3. Set the threshold in MB (default **5**, allowed range **1–100**).
+4. Click **Save**, then commit a changed qualifying EPM workbook.
+
+The option defaults to off, including existing repository configurations.
+It applies to company/team EPM reports, input schedules and other Excel workbooks
+under `EEXCEL`. Data Manager transformation/conversion workbooks and generated
+definitions remain in regular Git. The maximum LFS transfer size is **128 MB**;
+1 MB means 1,048,576 bytes.
+
+bpcGit uploads the workbook before pushing its SHA-256 pointer and adds exact
+root `.gitattributes` rules in the same Git commit. Overview comparison uses
+pointer hashes without downloading LFS workbook bytes. Current and historical
+restores download the actual workbook and verify its size and SHA-256 before
+writing it to BPC. Nested `.gitattributes` affecting the workbook must be
+consolidated at the repository root first.
+
+Existing history is retained: previously committed binaries switch to LFS only
+on a future changed, qualifying commit. Enabling the setting does not upload
+existing files automatically or remove older binaries from Git. Bitbucket's
+LFS page may therefore show **No Git LFS files** until that first commit.
+Existing nonempty LFS workbooks continue using LFS when they shrink below the
+threshold; turning the option off prevents further writes to them. Reading,
+restoring and deleting existing LFS files remain available.
+
+Bitbucket LFS permissions/storage quota and SAP HTTPS trust/connectivity to the
+LFS storage hosts are required. A failed upload prevents Git push; a later
+failed push can leave an unreferenced LFS upload without recording a successful
+BPC sync. See [the LFS specification](docs/SPEC.md#opt-in-git-lfs-for-large-epm-workbooks-0160)
+for transfer and pointer-format limits.
+
+Local UI/Git compatibility checks and SAP activation passed. Live Bitbucket LFS
+upload/restore acceptance remains pending; SAP Unit execution is currently
+blocked by an ADT HTTP 400 error.
 
 ## REST API
 
@@ -31,12 +94,13 @@ Base path: `/sap/bc/zbpc_git` (handler `ZCL_BPC_GIT_HTTP`)
 | GET | `/models?environment=<id>` | Authorized models; no Git pull or file comparison |
 | GET | `/dimensions?environment=<id>` | Supported accessible dimensions; no member scan or Git comparison |
 | GET | `/config?environment=<id>` | Repository setup of an environment |
-| POST | `/config` | Save it (`environment`, `url`, `branch`) |
+| POST | `/config` | Save it (`environment`, `url`, `branch`; optional `lfsEnabled`, `lfsThresholdMb`) |
 | POST | `/connection` | Test the connection (`environment`; optional `user`, `token`) |
 | POST | `/workbooks` | Tracked files in BPC and Git with their status (`environment`; optional `kind`, `model`, `dimension`, `user`, `token`); returns stage timings |
 | POST | `/commit` | Commit selected files (`environment`, `message`, `commit` = head seen, `paths` one per line; `user`, `token`) |
 | POST | `/restore` | Write a Git version into BPC (`environment`, `commit` = head seen, `paths`; optional `version`, `depth`, `user`, `token`) |
 | POST | `/history` | Changes to one item (`environment`, `path`; optional `depth`, `user`, `token`) |
+| POST | `/diff` | Current Git/BPC content for one supported item (`environment`, `path`; optional `user`, `token`) |
 
 Git login works as in abapGit: requests go without credentials first. When the
 Git host wants a login, the API answers 403 with `"authRequired": true` and the
@@ -46,18 +110,6 @@ never stored on the server.
 
 POST requests must carry `X-Requested-With: XMLHttpRequest` (jQuery sets it), so
 a form on another website cannot change data with the user's session.
-
-## Build steps
-
-1. BSP app shell (done)
-2. REST handler with `/ping`, shown on the start page (done)
-3. Config table `ZBPC_GIT_REPO` and setup screen (done)
-4. abapGit wrapper, Git login as in abapGit, "Test connection" (done)
-5. Workbook list with Git status; sync table `ZBPC_GIT_STATE` (done)
-6. Commit selected files (staging) (done)
-7. Restore selected files from Git (implemented; latest discard-change cases
-   await acceptance testing)
-8. File history and restore of an older version (implemented; SAP acceptance pending)
 
 ## Data Manager content
 
@@ -69,10 +121,10 @@ Generated XML has no BPC last-change timestamp. Duplicate names or sanitized
 path collisions are unsupported; resolve these names before tracking them.
 The REST endpoints are unchanged. See specification section 3.4.
 
-After deployment through abapGit, check package and link listing and Type
-filters, commit representative XML, restore an edited script/link in BPC,
-and confirm a second refresh shows Unchanged. Also test a team package and
-a package using its chain's default script. SAP/browser acceptance is pending.
+Package listing and Diff have been checked in the SAP browser. Commit/restore
+acceptance still needs representative package/link XML, an edited script/link,
+a team package and a package using its chain's default script. Confirm a second
+refresh shows Unchanged after each successful action.
 
 Transformation and conversion workbooks each appear once in the overview.
 Their status, commit, and restore include the paired definition automatically.
@@ -83,7 +135,12 @@ history extends the recent branch range to at most 1,000 commits. Restoring an
 older version changes BPC and leaves it ready to commit; it does not move Git.
 Local UI regression checks: `node tests/history_ui.test.cjs`.
 
-## Scoped loading (0.11.0)
+History initially examines 20 first-parent branch commits; **Load older history**
+extends that range by 20 up to 1,000. Bitbucket Cloud uses commit/path metadata
+APIs instead of downloading Git file content for History, with authorized,
+head-checked metadata caching. Other hosts retain the abapGit history path.
+
+## Scoped loading and performance
 
 Opening an environment reads setup and authorized model names only. Choose one
 object type and optionally a model, then press **Load**. SAP lists and compares
@@ -104,16 +161,26 @@ to compare one model with all models and first load with refresh before deciding
 whether parallel SAP processing is worthwhile. Shared buffer reuse is local to
 an application server and is a best-effort optimization.
 
-Version 0.11.1 adds **All objects** to the type choices. EPM workbooks remains
-the default; All objects loads every supported type in the selected model scope.
-
-Version 0.11.2 replaces the combined EPM workbook load choice with EPM reports
-(default), EPM input schedules and Other EPM workbooks. The API accepts REPORT,
+The load choices are EPM reports (default), EPM input schedules and Other EPM
+workbooks, alongside the other supported object types. The API accepts REPORT,
 SCHEDULE and OTHER scopes while retaining WORKBOOK for older clients. Company
 reports/schedules list their specific library; team listings filter by the
 library directly beneath EEXCEL before comparing content. Git-only files use
 the same classification. Other covers books, distribution lists and remaining
 workbook paths; All objects continues to include all supported objects.
+
+Diff skips the full status comparison. For Bitbucket Cloud it normally fetches
+only the selected Git paths at a freshly authorized, pinned head (a raw-source
+LFS redirect falls back to reading its pointer through Git). A regular selected
+Git file has a 16 MB Diff read limit. Text rendering also has bounded size/row
+limits; large content reports its limit explicitly.
+
+Single-object commits validate only selected paths and required companions.
+After a successful push, the Git metadata cache is updated so the following
+refresh can avoid downloading the same repository content again. Commit still
+requires a fresh Git snapshot, and BPC listing/serialization plus the refresh
+remain scoped operations. These changes do not guarantee constant-time commits;
+older large binaries in Git history can still affect transfer time.
 
 ## Security definitions (0.12.0)
 
