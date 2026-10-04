@@ -20,7 +20,12 @@ or BPC content has been changed during implementation. Formatter, LFS setup UI, 
 pointer/quoted filename compatibility checks pass. ABAP Unit fixtures cover
 upload/verify, existing objects, corrupt downloads, headers, thresholds and
 local pointer hash comparisons; execution in SAP is pending. ADT source and
-syntax calls still fail HTTP 400. Deployment and live LFS acceptance pending.
+syntax calls still fail HTTP 400. Playwright pulled/activated all changes via abapGit. Running app shows
+0.16.0, API Connected, LFS unchecked/5 MB, and toggling it enables the threshold
+control. No setup Save or BPC content write/commit was performed. SAP Unit run
+also fails ADT HTTP 400; live Bitbucket LFS upload/restore remains unverified
+without a current Git login. Follow-up normalizes XFELD table serialization
+and uses SAP's SHA256 algorithm identifier.
 
 0.15.8 limits commit status comparison to selected paths and transformation/
 conversion companions, preserving grouping/conflict checks. After successful

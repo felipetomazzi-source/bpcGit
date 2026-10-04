@@ -896,7 +896,7 @@ Batch requests use the existing request-local Basic Git credentials against
 Bitbucket's repository LFS endpoint. Storage actions use only server-supplied
 headers; repository credentials are never forwarded to storage URLs. HTTPS is
 required; redirects are disabled. Tokens, action URLs, response bodies and file
-bytes are not persisted in SAP caches/logs. Transfers are synchronous, bounded
+bytes are not persisted by bpcGit. Transfers are synchronous, bounded
 after receiving the response, with a 60-second HTTP timeout. SAP must trust and
 reach the LFS/storage hosts as well as bitbucket.org and api.bitbucket.org.
 Bitbucket token LFS permissions and storage quota also apply.

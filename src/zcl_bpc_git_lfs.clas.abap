@@ -69,7 +69,7 @@ CLASS zcl_bpc_git_lfs IMPLEMENTATION.
   METHOD sha256.
     TRY.
         cl_abap_message_digest=>calculate_hash_for_raw(
-          EXPORTING if_algorithm = 'SHA-256' if_data = iv_data
+          EXPORTING if_algorithm = 'SHA256' if_data = iv_data
           IMPORTING ef_hashstring = rv_hash ).
         rv_hash = to_lower( rv_hash ).
       CATCH cx_root.
