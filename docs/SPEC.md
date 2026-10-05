@@ -904,3 +904,18 @@ Bitbucket token LFS permissions and storage quota also apply.
 References: [Git LFS batch protocol](https://github.com/git-lfs/git-lfs/blob/main/docs/api/batch.md),
 [pointer format](https://github.com/git-lfs/git-lfs/blob/main/docs/spec.md),
 [Bitbucket source API](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-source/).
+
+## BPCIO embedded component (0.16.1)
+
+Contract agreed with the BPCIO integration: namespace `bpc.git`, component URL
+`/sap/bc/ui5_ui5/sap/zbpc_git/`, settings `embedded` (boolean, false default) and
+`environment` (string, empty default). UI5 1.52 host uses `sap.ui.component` and
+`ComponentContainer`; no additional bootstrap or componentData. Embedded hides
+its page header, leaves navigation/header ownership with the hub, and shares
+the host UI5 theme. `setEnvironment(string)` clears old scope and selects only
+an authorized host environment. Empty/unauthorized selections never fall back.
+The host may invoke `requestNavigateBack()`; `navigateBack` carries `environment`.
+Host may retain component state on back, and owns container/component destruction.
+Outstanding client requests and theme listeners are cleaned up on destruction;
+server writes already underway are not canceled. Standalone behavior is preserved.
+See README for the integration example. No changes to backend or BPCIO repository.

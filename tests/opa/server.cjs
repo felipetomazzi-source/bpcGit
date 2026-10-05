@@ -12,20 +12,23 @@ const files = {
   '/app/controller/App.controller.js': 'src/zbpc_git.wapa.controller_-app.controller.js',
   '/app/view/App.view.xml': 'src/zbpc_git.wapa.view_-app.view.xml',
   '/': 'tests/opa/index.html',
-  '/journey.js': 'tests/opa/journey.js'
+  '/journey.js': 'tests/opa/journey.js',
+  '/embedded.html': 'tests/opa/embedded.html',
+  '/embedded.js': 'tests/opa/embedded.js'
 };
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  const theme = /^\/resources\/(sap\/[^]+)\/themes\/sap_belize\/library(?:-parameters\.json|\.css)$/.exec(url.pathname);
+  const theme = /^\/resources\/(sap\/[^]+)\/themes\/(sap_belize(?:_plus)?)\/library(?:-parameters\.json|\.css)$/.exec(url.pathname);
   if (theme) {
     const library = theme[1];
+    const key = library + theme[2];
     try {
-      if (!themes.has(library)) {
-        themes.set(library, builder.build({ lessInputPath: library + '/themes/sap_belize/library.source.less',
+      if (!themes.has(key)) {
+        themes.set(key, builder.build({ lessInputPath: library + '/themes/' + theme[2] + '/library.source.less',
           rootPaths: libraries.map(name => path.join(__dirname, 'node_modules/@openui5', name, 'src')),
           library: { name: library.replace(/\//g, '.') }, rtl: false }));
       }
-      const result = await themes.get(library);
+      const result = await themes.get(key);
       const json = url.pathname.endsWith('.json');
       res.writeHead(200, { 'Content-Type': json ? 'application/json' : 'text/css' });
       res.end(json ? JSON.stringify(result.variables) : result.css);
@@ -36,7 +39,7 @@ http.createServer(async (req, res) => {
     const resource = url.pathname.split('/').pop();
     const fixtures = {
       ping: { abapGit: true },
-      environments: { environments: [{ id: 'TEST', text: 'Local test environment' }] },
+      environments: { environments: [{ id: 'TEST', text: 'Local test environment' }, { id: 'HOST_A' }, { id: 'HOST_B' }] },
       config: { configured: true, url: 'https://example.invalid/test.git', branch: 'main', changedBy: 'TEST', changedAt: '2026-10-04' },
       models: { models: ['PLAN'] },
       dimensions: { dimensions: ['ACCOUNT', 'ENTITY'] }

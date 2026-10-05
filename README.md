@@ -4,7 +4,7 @@ Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
 package links, security definitions, BPF template designs and dimension members.
 The app is a UI5 BSP application, installed with abapGit into package `ZBPC_GIT`.
-Current version: **0.16.0**. Target runtime: ABAP 7.52 and UI5 1.52.
+Current version: **0.16.1**. Target runtime: ABAP 7.52 and UI5 1.52.
 
 Choose an object type and optional model, then **Load**. Select objects to
 commit, restore or inspect their history. EPM reports and input schedules have
@@ -245,3 +245,49 @@ other local members. Validate and process the dimension in BPC afterward.
 Properties/hierarchies must already exist with a matching schema, and referenced
 parents/members should be available first. Descriptions use the SAP session
 language. Member deletion and transaction data remain outside Git restore.
+
+## Embed in the BPCIO hub
+
+The integration contract was agreed with the BPCIO integration before implementation.
+The namespace remains `bpc.git`; its separate BSP component URL is
+`/sap/bc/ui5_ui5/sap/zbpc_git/`. The repository and `/sap/bc/zbpc_git/` backend
+remain independent. Use the existing host UI5 core (1.52+) and load the component,
+without loading its standalone `index.html` or bootstrapping UI5 again:
+
+```javascript
+var git = sap.ui.component({
+  name: "bpc.git",
+  url: "/sap/bc/ui5_ui5/sap/zbpc_git/",
+  settings: { embedded: true, environment: selectedEnvironment }
+});
+git.attachNavigateBack(function (event) {
+  showHub(event.getParameter("environment"));
+});
+var container = new sap.ui.core.ComponentContainer({
+  component: git, height: "100%", width: "100%"
+});
+```
+
+The host loads `sap/ui/core/ComponentContainer` before creating the container.
+No `componentData` is required. The embedded component hides its page header,
+disables its environment selector, and inherits the host theme, including later
+theme changes. The hub owns its header and Back button. The host can call
+`git.requestNavigateBack()` to raise `navigateBack({ environment: string })`.
+The component does not change the host route itself.
+
+Call `git.setEnvironment(selectedEnvironment)` when the hub selection changes.
+This clears the previous overview, closes dialogs, and loads configuration and
+model metadata for the authorized environment; object comparison remains explicit.
+An empty or unauthorized environment shows a message, with no fallback to a
+remembered standalone environment. Old environment responses are ignored.
+Embedded selections do not change the standalone saved environment.
+
+Keep the same component when navigating back if the hub should retain Git state.
+When disposing it, destroy both its container and component; pending client
+requests and theme listeners are cleaned up. Avoid switching or disposing during
+a commit or restore: discarding a client response cannot cancel a server write
+already in progress. Git credentials retain the existing tab-session behavior.
+
+Standalone `index.html` remains supported, with its own header, selectable
+remembered environment and Belize bootstrap theme. The BPCIO host implementation
+is maintained separately; this change prepares the bpcGit side of the contract.

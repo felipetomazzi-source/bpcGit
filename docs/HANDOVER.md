@@ -5,6 +5,17 @@ that continues the work. Read this first, then `docs/SPEC.md`, the
 functional spec. The spec is kept up to date and records every decision with
 its reason.
 
+## Embedded integration update (2026-10-05)
+
+0.16.1 prepares the independent `bpc.git` component for the BPCIO hub. Contract
+was coordinated with the BPCIO chat "Read project documentation" before coding.
+See README for URL, settings, setter, navigation event and ownership details.
+Host changes are not part of this repository. Browser harness `embedded.html`
+uses the actual UI5 1.52 component factory to test settings timing, authorization,
+environment switching, navigation, theme inheritance and standalone recreation.
+The lifecycle regression test also checks stale A->B->A replies and destruction.
+SAP deployment is through the user's abapGit pull and activation.
+
 ## Current update (2026-10-03)
 
 0.16.0 adds opt-in Bitbucket Cloud Git LFS for large EPM workbooks. Repository

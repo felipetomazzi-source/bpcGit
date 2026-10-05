@@ -33,3 +33,5 @@ option, disabled model selection, dimension-scoped loading, and a decoded
 member name rendered in the table. The mock refuses an incorrectly scoped
 member load. Native BPC save/restore and real authorization still require SAP
 acceptance after abapGit activation.
+
+Open `/embedded.html` on the same local server for the BPCIO embedding contract journey, including a host dark theme and standalone recreation. All API fixtures remain local and read-only.
