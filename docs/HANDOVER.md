@@ -7,6 +7,17 @@ its reason.
 
 ## Embedded integration update (2026-10-05)
 
+Authentication investigation (2026-10-05): refreshed Windows User MCP Git
+credentials resolved CH_PLANNING access to chorus_bpc_workspace/chorus_bpc.git.
+SAP connection/read/push advertisement and scoped DEMREV comparison succeeded
+(29 scripts); workstation REST and both advertisements returned 200. Prior
+User credentials failed the same workstation smart-HTTP checks, so the failing
+credential did not demonstrate a SAP-only transport fault. No BPC/Git writes.
+New `/diagnostics` separates read/push checks and reports presence/source/scheme,
+non-secret username, URLs/statuses/timings without secrets. Fixes 403 authRequired
+classification. Remote class ADT syntax checked; HTTP handler depends on the
+new remote public method. Pull/activation and ABAP Unit execution remain required.
+
 0.16.1 prepares the independent `bpc.git` component for the BPCIO hub. Contract
 was coordinated with the BPCIO chat "Read project documentation" before coding.
 See README for URL, settings, setter, navigation event and ownership details.

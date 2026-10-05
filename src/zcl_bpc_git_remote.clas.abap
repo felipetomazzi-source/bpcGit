@@ -6,6 +6,28 @@
 CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES ty_branches TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    TYPES: BEGIN OF ty_auth_check,
+             check_name TYPE string,
+             method TYPE string,
+             url TYPE string,
+             auth_scheme TYPE string,
+             status TYPE i,
+             status_source TYPE string,
+             elapsed_ms TYPE i,
+             ok TYPE abap_bool,
+             auth_required TYPE abap_bool,
+             message TYPE string,
+           END OF ty_auth_check,
+           ty_auth_checks TYPE STANDARD TABLE OF ty_auth_check WITH DEFAULT KEY,
+           BEGIN OF ty_auth_diagnostics,
+             credentials_found TYPE abap_bool,
+             username TYPE string,
+             rest_url TYPE string,
+             rest_scheme TYPE string,
+             checks TYPE ty_auth_checks,
+           END OF ty_auth_diagnostics.
+    METHODS auth_diagnostics RETURNING VALUE(rs_result) TYPE ty_auth_diagnostics
+      RAISING zcx_abapgit_exception.
     TYPES:
       BEGIN OF ty_connection,
         "! Branch names, without refs/heads/
@@ -76,7 +98,7 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
     "! missing. Read dynamically so the caller can report a missing abapGit.
     CLASS-METHODS get_abapgit_version
       RETURNING VALUE(rv_version) TYPE string.
-    "! True if the Git host refused the request for missing or wrong credentials.
+    "! True for authentication/authorization failures (401/403); permissions may be missing.
     CLASS-METHODS is_auth_error
       IMPORTING ix_error TYPE REF TO zcx_abapgit_exception
       RETURNING VALUE(rv_auth_error) TYPE abap_bool.
@@ -186,9 +208,85 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD is_auth_error.
-    " abapGit has no own exception for this; both of its texts say so
-    " ('Unauthorized access. Check your credentials' and '... (HTTP 401) ...').
-    rv_auth_error = boolc( ix_error->get_text( ) CS 'Unauthorized' ).
+    " abapGit exposes these failures as text, not a distinct exception type.
+    DATA(lv_message) = to_lower( ix_error->get_text( ) ).
+    rv_auth_error = xsdbool( lv_message CS 'unauthorized'
+      OR lv_message CS 'http 401' OR lv_message CS 'http 403' ).
+  ENDMETHOD.
+
+  METHOD auth_diagnostics.
+    rs_result-credentials_found = mv_has_credentials.
+    rs_result-username = mv_cache_user.
+    rs_result-rest_url = mv_bitbucket_api.
+    REPLACE REGEX '://[^/]*@' IN rs_result-rest_url WITH '://[redacted]@'.
+    rs_result-rest_scheme = COND #( WHEN mv_bitbucket_api IS INITIAL THEN 'not applicable'
+      WHEN mv_has_credentials = abap_false THEN 'none'
+      WHEN mv_cache_user = 'x-token-auth' THEN 'Bearer' ELSE 'Basic' ).
+    DATA lt_services TYPE string_table.
+    APPEND `upload` TO lt_services.
+    APPEND `receive` TO lt_services.
+    LOOP AT lt_services INTO DATA(lv_service).
+      DATA lv_started TYPE i.
+      DATA lv_finished TYPE i.
+      GET RUN TIME FIELD lv_started.
+      DATA(ls_check) = VALUE ty_auth_check(
+        check_name = COND #( WHEN lv_service = 'upload' THEN 'read' ELSE 'pushAdvertisement' )
+        method = 'GET'
+        url = zcl_abapgit_url=>host( mv_url ) && zcl_abapgit_url=>path_name( mv_url ) &&
+          |/info/refs?service=git-{ lv_service }-pack|
+        auth_scheme = COND #( WHEN mv_has_credentials = abap_true THEN 'Basic' ELSE 'none' ) ).
+      REPLACE REGEX '://[^/]*@' IN ls_check-url WITH '://[redacted]@'.
+      DATA lo_client TYPE REF TO zcl_abapgit_http_client.
+      CLEAR lo_client.
+      TRY.
+          TEST-SEAM auth_diagnostic_http.
+            " Restore request-local login after a preceding rejected check cleared it.
+            IF mv_has_credentials = abap_true.
+              zcl_abapgit_login_manager=>set_basic( iv_uri = mv_url
+                iv_username = mv_cache_user iv_password = mv_token ).
+            ENDIF.
+            DATA lt_headers TYPE zcl_abapgit_http=>ty_headers.
+            CLEAR lt_headers.
+            APPEND VALUE #( key = '~request_uri' value = zcl_abapgit_url=>path_name( mv_url ) &&
+              |/info/refs?service=git-{ lv_service }-pack| ) TO lt_headers.
+            lo_client = zcl_abapgit_http=>create_by_url( iv_url = mv_url it_headers = lt_headers ).
+            lo_client->check_smart_response(
+              iv_expected_content_type = |application/x-git-{ lv_service }-pack-advertisement|
+              iv_content_regex = '^[0-9a-f]{4}#' ).
+            lo_client->close( ).
+            ls_check-status = 200.
+            ls_check-status_source = 'successful HTTP 200 and advertisement checks'.
+            ls_check-ok = abap_true.
+          END-TEST-SEAM.
+        CATCH zcx_abapgit_exception INTO DATA(lx_error).
+          IF lo_client IS BOUND.
+            lo_client->close( ).
+          ENDIF.
+          ls_check-message = lx_error->get_text( ).
+          ls_check-auth_required = is_auth_error( lx_error ).
+          DATA lv_status TYPE string.
+          CLEAR lv_status.
+          FIND REGEX 'HTTP ([0-9]{3})' IN ls_check-message SUBMATCHES lv_status.
+          IF sy-subrc = 0.
+            ls_check-status = CONV i( lv_status ).
+            ls_check-status_source = 'abapGit exception message'.
+          ELSE.
+            ls_check-status_source = 'unknown; no HTTP status exposed by abapGit exception'.
+          ENDIF.
+      ENDTRY.
+      " No response bodies, auth headers or token material are returned or persisted.
+      IF mv_token IS NOT INITIAL.
+        REPLACE ALL OCCURRENCES OF mv_token IN ls_check-message WITH '[redacted]'.
+        DATA(lv_encoded) = cl_http_utility=>encode_base64( mv_cache_user && ':' && mv_token ).
+        REPLACE ALL OCCURRENCES OF lv_encoded IN ls_check-message WITH '[redacted]'.
+      ENDIF.
+      APPEND ls_check TO rs_result-checks.
+      GET RUN TIME FIELD lv_finished.
+      rs_result-checks[ lines( rs_result-checks ) ]-elapsed_ms = ( lv_finished - lv_started ) DIV 1000.
+    ENDLOOP.
+    IF mv_token IS NOT INITIAL AND rs_result-username = mv_token.
+      rs_result-username = '[redacted]'.
+    ENDIF.
   ENDMETHOD.
 
   METHOD blob_sha1.

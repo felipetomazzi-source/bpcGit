@@ -174,3 +174,71 @@ CLASS ltcl_root_folder IMPLEMENTATION.
     ENDTRY.
   ENDMETHOD.
 ENDCLASS.
+
+CLASS ltcl_auth_diagnostics DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
+  PUBLIC SECTION.
+    CLASS-DATA fail_read TYPE abap_bool.
+  PRIVATE SECTION.
+    METHODS setup.
+    METHODS credentials_and_urls FOR TESTING RAISING zcx_abapgit_exception.
+    METHODS anonymous_failure FOR TESTING RAISING zcx_abapgit_exception.
+    METHODS status_classification FOR TESTING.
+ENDCLASS.
+
+CLASS ltcl_auth_diagnostics IMPLEMENTATION.
+  METHOD setup.
+    fail_read = abap_false.
+    TEST-INJECTION auth_diagnostic_http.
+      IF ltcl_auth_diagnostics=>fail_read = abap_true AND lv_service = 'upload'.
+        zcx_abapgit_exception=>raise( 'Forbidden (HTTP 403) diagnostic-fixture-secret' ).
+      ENDIF.
+      ls_check-status = 200.
+      ls_check-status_source = 'fixture'.
+      ls_check-ok = abap_true.
+    END-TEST-INJECTION.
+  ENDMETHOD.
+
+  METHOD credentials_and_urls.
+    fail_read = abap_true.
+    DATA(remote) = NEW zcl_bpc_git_remote( iv_url = 'https://bitbucket.org/test/repo.git'
+      iv_user = 'x-token-auth' iv_token = 'diagnostic-fixture-secret' ).
+    DATA(result) = remote->auth_diagnostics( ).
+    cl_abap_unit_assert=>assert_equals( act = result-credentials_found exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals( act = result-username exp = 'x-token-auth' ).
+    cl_abap_unit_assert=>assert_equals( act = result-rest_scheme exp = 'Bearer' ).
+    cl_abap_unit_assert=>assert_equals( act = lines( result-checks ) exp = 2 ).
+    cl_abap_unit_assert=>assert_equals( act = result-checks[ 1 ]-status exp = 403 ).
+    cl_abap_unit_assert=>assert_equals( act = result-checks[ 1 ]-auth_required exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals( act = result-checks[ 1 ]-message exp = 'Forbidden (HTTP 403) [redacted]' ).
+    cl_abap_unit_assert=>assert_equals( act = result-checks[ 2 ]-ok exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals( act = result-checks[ 2 ]-url
+      exp = 'https://bitbucket.org/test/repo.git/info/refs?service=git-receive-pack' ).
+    cl_abap_unit_assert=>assert_equals( act = result-checks[ 2 ]-auth_scheme exp = 'Basic' ).
+  ENDMETHOD.
+
+  METHOD anonymous_failure.
+    fail_read = abap_true.
+    DATA(remote) = NEW zcl_bpc_git_remote( iv_url = 'https://bitbucket.org/test/repo.git' ).
+    DATA(result) = remote->auth_diagnostics( ).
+    cl_abap_unit_assert=>assert_equals( act = result-credentials_found exp = abap_false ).
+    cl_abap_unit_assert=>assert_equals( act = result-checks[ 1 ]-auth_scheme exp = 'none' ).
+    cl_abap_unit_assert=>assert_equals( act = result-checks[ 1 ]-auth_required exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals( act = result-checks[ 2 ]-ok exp = abap_true ).
+  ENDMETHOD.
+
+  METHOD status_classification.
+    DATA messages TYPE string_table.
+    APPEND 'Unauthorized access. Check your credentials' TO messages.
+    APPEND 'Authentication failed (HTTP 401)' TO messages.
+    APPEND 'Access to resource forbidden (HTTP 403)' TO messages.
+    APPEND 'Repository missing (HTTP 404)' TO messages.
+    LOOP AT messages INTO DATA(message).
+      TRY.
+          zcx_abapgit_exception=>raise( message ).
+        CATCH zcx_abapgit_exception INTO DATA(error).
+          cl_abap_unit_assert=>assert_equals( act = zcl_bpc_git_remote=>is_auth_error( error )
+            exp = xsdbool( message NS '404' ) ).
+      ENDTRY.
+    ENDLOOP.
+  ENDMETHOD.
+ENDCLASS.

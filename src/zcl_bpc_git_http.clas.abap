@@ -13,6 +13,7 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
         environments TYPE string VALUE '/environments',
         config       TYPE string VALUE '/config',
         connection   TYPE string VALUE '/connection',
+        diagnostics  TYPE string VALUE '/diagnostics',
         models       TYPE string VALUE '/models',
         dimensions   TYPE string VALUE '/dimensions',
         workbooks    TYPE string VALUE '/workbooks',
@@ -59,6 +60,9 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
     "! user and token, also checks push access. Credentials are used for this
     "! request only and never stored.
     METHODS handle_test_connection
+      IMPORTING io_service TYPE REF TO zcl_bpc_git_service
+      RAISING cx_uj_static_check.
+    METHODS handle_diagnostics
       IMPORTING io_service TYPE REF TO zcl_bpc_git_service
       RAISING cx_uj_static_check.
     "! Workbooks of the environment in BPC and Git, with their status.
@@ -152,6 +156,10 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
           WHEN c_resource-connection.
             IF require_method( c_method-post ).
               handle_test_connection( lo_service ).
+            ENDIF.
+          WHEN c_resource-diagnostics.
+            IF require_method( c_method-post ).
+              handle_diagnostics( lo_service ).
             ENDIF.
           WHEN c_resource-dimensions.
             IF require_method( c_method-get ).
@@ -323,6 +331,42 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       `,"pushChecked":` && COND string( WHEN ls_result-push_checked = abap_true THEN `true` ELSE `false` ) &&
       `,"pushOk":` && COND string( WHEN ls_result-push_ok = abap_true THEN `true` ELSE `false` ) &&
       `,"pushMessage":` && quote( ls_result-push_message ) && `}` ).
+  ENDMETHOD.
+
+  METHOD handle_diagnostics.
+    DATA ls_config TYPE zbpc_git_repo.
+    DATA lo_remote TYPE REF TO zcl_bpc_git_remote.
+    TRY.
+        create_remote( EXPORTING io_service = io_service
+          IMPORTING es_config = ls_config eo_remote = lo_remote ).
+        IF lo_remote IS NOT BOUND.
+          RETURN.
+        ENDIF.
+        DATA(ls_result) = lo_remote->auth_diagnostics( ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_git).
+        respond_git_error( ix_error = lx_git iv_with_login = abap_false ).
+        RETURN.
+    ENDTRY.
+    DATA lv_checks TYPE string.
+    DATA lv_separator TYPE string.
+    LOOP AT ls_result-checks INTO DATA(ls_check).
+      lv_checks = lv_checks && lv_separator && `{"check":` && quote( ls_check-check_name ) &&
+        `,"method":` && quote( ls_check-method ) && `,"url":` && quote( ls_check-url ) &&
+        `,"authScheme":` && quote( ls_check-auth_scheme ) && `,"status":` && CONV string( ls_check-status ) &&
+        `,"statusSource":` && quote( ls_check-status_source ) &&
+        `,"elapsedMs":` && CONV string( ls_check-elapsed_ms ) &&
+        `,"ok":` && COND string( WHEN ls_check-ok = abap_true THEN `true` ELSE `false` ) &&
+        `,"authRequired":` && COND string( WHEN ls_check-auth_required = abap_true THEN `true` ELSE `false` ) &&
+        `,"message":` && quote( ls_check-message ) && `}`.
+      lv_separator = ','.
+    ENDLOOP.
+    respond( iv_code = 200 iv_reason = 'OK' iv_json =
+      `{"environment":` && quote( ls_config-appset ) && `,"branch":` && quote( ls_config-branch ) &&
+      `,"credentialSource":"request form only; no SAP credential store",` &&
+      `"credentialFound":` && COND string( WHEN ls_result-credentials_found = abap_true THEN `true` ELSE `false` ) &&
+      `,"username":` && quote( ls_result-username ) && `,"restApiUrl":` && quote( ls_result-rest_url ) &&
+      `,"restAuthScheme":` && quote( ls_result-rest_scheme ) && `,"restChecked":false,` &&
+      `"checks":[` && lv_checks && `]}` ).
   ENDMETHOD.
 
   METHOD handle_dimensions.

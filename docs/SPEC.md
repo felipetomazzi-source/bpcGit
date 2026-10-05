@@ -1,5 +1,31 @@
 # bpcGit: functional specification (v0.1, draft)
 
+## Request-local authentication diagnostics (2026-10-05)
+
+Read-only POST `/diagnostics` uses the same authorized environment/configuration
+lookup as `/connection`. It accepts optional request-form user/token, reports
+whether both are present, their non-secret username, and independent smart-HTTP
+upload-pack and receive-pack advertisements. It does not push, compare BPC
+content or update configuration/sync state. HTTP 200 contains checks with
+`check`, `method`, `url`, `authScheme`, `status`, `statusSource`, `elapsedMs`,
+`ok`, `authRequired`, and sanitized `message`. Failed read does not skip push.
+Status is recovered from an abapGit exception when available, otherwise 0 with
+an explicit unknown source. Success requires HTTP 200 plus a valid advertisement.
+REST target/scheme are descriptive only (`restChecked=false`). Do not infer an
+actual intercepted Authorization header from the intended scheme.
+
+Credentials are request-local, not stored under an environment ID in a table,
+SSF or secure store. Git-host HTTP 401 and HTTP 403 are both authorization
+failures for the existing login response; distinguish absent credentials from
+present credentials with `credentialFound`. A present credential plus 403 can
+mean invalid credentials or insufficient permission. No raw headers, token,
+response bodies or persistent diagnostic logs are exposed.
+
+Smart HTTP uses the installed abapGit HTTP factory, including its SSL identity,
+proxy configuration and optional exits. Runtime SM59/STRUST/proxy inspection is
+separate from this endpoint. Bitbucket REST history/diff use their existing
+direct HTTP client path and must not be conflated with smart-HTTP preflight.
+
 ## Repository URL login import (0.15.3)
 
 The setup URL field accepts pasted HTTPS URLs containing `user:token@host`.

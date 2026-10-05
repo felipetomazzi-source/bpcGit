@@ -96,6 +96,7 @@ Base path: `/sap/bc/zbpc_git` (handler `ZCL_BPC_GIT_HTTP`)
 | GET | `/config?environment=<id>` | Repository setup of an environment |
 | POST | `/config` | Save it (`environment`, `url`, `branch`; optional `lfsEnabled`, `lfsThresholdMb`) |
 | POST | `/connection` | Test the connection (`environment`; optional `user`, `token`) |
+| POST | `/diagnostics` | Independent smart-HTTP read/push-advertisement checks (`environment`; optional `user`, `token`); no Git/BPC write |
 | POST | `/workbooks` | Tracked files in BPC and Git with their status (`environment`; optional `kind`, `model`, `dimension`, `user`, `token`); returns stage timings |
 | POST | `/commit` | Commit selected files (`environment`, `message`, `commit` = head seen, `paths` one per line; `user`, `token`) |
 | POST | `/restore` | Write a Git version into BPC (`environment`, `commit` = head seen, `paths`; optional `version`, `depth`, `user`, `token`) |
@@ -107,6 +108,25 @@ Git host wants a login, the API answers 403 with `"authRequired": true` and the
 app asks for user and personal access token, keeps the token in the browser tab's `sessionStorage`,
 and retries. Only the user name persists in `localStorage`; credentials are
 never stored on the server.
+
+`/diagnostics` reports credential presence, request-local source and non-secret
+username, then checks `GET <repo>/info/refs?service=git-upload-pack` and
+`GET <repo>/info/refs?service=git-receive-pack` separately. Each check includes
+the intended auth scheme, URL, status, status source, elapsed milliseconds,
+outcome and sanitized error. Tokens, Basic headers and response bodies are
+excluded. Failure of the read check does not suppress the push check. A status
+of 0 means abapGit did not expose a numeric status; this is not an HTTP response
+code. Successful push advertisement is a permission preflight, not a test push.
+REST URL/auth metadata are also returned, with `restChecked=false`.
+
+Smart HTTP uses abapGit's request-local Basic login; Bitbucket REST reads use
+Bearer for `x-token-auth`, Basic for other usernames. `ZBPC_GIT_REPO` stores
+repository settings, not credentials. There is no environment-keyed secure
+store, SSF lookup or shared browser abapGit login in this service. The constructor
+clears the login manager before setting the supplied request credentials.
+Both Git-host 401 and 403 now produce `authRequired=true`; a 403 can also mean
+insufficient repository permission, so it does not prove a bad password.
+Pull/activate the new ABAP classes through abapGit to expose this endpoint.
 
 POST requests must carry `X-Requested-With: XMLHttpRequest` (jQuery sets it), so
 a form on another website cannot change data with the user's session.
