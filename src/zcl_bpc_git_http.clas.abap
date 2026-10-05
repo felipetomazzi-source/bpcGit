@@ -249,6 +249,18 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     ls_config-appset = lv_environment.
     ls_config-url = lv_url.
     ls_config-branch = lv_branch.
+    DATA lt_fields TYPE tihttpnvp.
+    mo_server->request->get_form_fields( CHANGING fields = lt_fields ).
+    IF line_exists( lt_fields[ name = 'rootFolder' ] ).
+      ls_config-root_folder = read_field( iv_name = 'rootFolder' iv_label = 'BPC root folder'
+        iv_max_length = 255 iv_required = abap_false ).
+    ELSE.
+      DATA(ls_saved) = io_service->get_config( ls_config-appset ).
+      ls_config-root_folder = ls_saved-root_folder.
+    ENDIF.
+    IF mv_invalid = abap_true.
+      RETURN.
+    ENDIF.
     DATA(lv_lfs_enabled) = read_field( iv_name = 'lfsEnabled' iv_label = 'Git LFS enabled'
       iv_max_length = 5 iv_required = abap_false ).
     DATA(lv_lfs_mb) = read_field( iv_name = 'lfsThresholdMb' iv_label = 'Git LFS threshold'
@@ -651,7 +663,7 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     ENDIF.
     ev_with_login = xsdbool( lv_user IS NOT INITIAL AND lv_token IS NOT INITIAL ).
     eo_remote = NEW zcl_bpc_git_remote( iv_url = es_config-url iv_user = lv_user iv_token = lv_token
-      iv_lfs_enabled = es_config-lfs_enabled iv_lfs_mb = COND #( WHEN es_config-lfs_mb > 0 THEN es_config-lfs_mb ELSE 5 ) ).
+      iv_root_folder = CONV string( es_config-root_folder ) iv_lfs_enabled = es_config-lfs_enabled iv_lfs_mb = COND #( WHEN es_config-lfs_mb > 0 THEN es_config-lfs_mb ELSE 5 ) ).
   ENDMETHOD.
 
   METHOD respond_git_error.
@@ -675,6 +687,7 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       `,"configured":` && COND string( WHEN is_config IS INITIAL THEN `false` ELSE `true` ) &&
       `,"url":` && quote( is_config-url ) &&
       `,"branch":` && quote( is_config-branch ) &&
+      `,"rootFolder":` && quote( is_config-root_folder ) &&
       `,"lfsEnabled":` && COND string( WHEN is_config-lfs_enabled = abap_true THEN `true` ELSE `false` ) &&
       `,"lfsThresholdMb":` && CONV string( COND i( WHEN is_config-lfs_mb > 0 THEN is_config-lfs_mb ELSE 5 ) ) &&
       `,"changedBy":` && quote( is_config-changed_by ) &&

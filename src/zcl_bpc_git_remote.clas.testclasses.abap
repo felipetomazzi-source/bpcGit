@@ -128,3 +128,49 @@ CLASS ltcl_lfs_hash IMPLEMENTATION.
       exp = zcl_bpc_git_remote=>blob_sha1( zcl_bpc_git_lfs=>pointer( data ) ) ).
   ENDMETHOD.
 ENDCLASS.
+
+CLASS ltcl_root_folder DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
+  PRIVATE SECTION.
+    METHODS mapping_and_scope FOR TESTING RAISING zcx_abapgit_exception.
+    METHODS rooted_content FOR TESTING RAISING zcx_abapgit_exception.
+    METHODS invalid_folder FOR TESTING.
+ENDCLASS.
+
+CLASS ltcl_root_folder IMPLEMENTATION.
+  METHOD mapping_and_scope.
+    DATA(remote) = NEW zcl_bpc_git_remote( iv_url = 'https://bitbucket.org/test/repo' iv_root_folder = '/content/bpc/' ).
+    cl_abap_unit_assert=>assert_equals( act = remote->repository_path( 'M/EEXCEL/REPORTS/X.XLSX' )
+      exp = 'content/bpc/M/EEXCEL/REPORTS/X.XLSX' ).
+    DATA(content) = VALUE zcl_bpc_git_remote=>ty_branch_content( files = VALUE #(
+      ( path = 'src/zexample.clas.abap' sha1 = '1' )
+      ( path = 'content/bpc/M/X.XLS' sha1 = '2' )
+      ( path = 'content/bpc-other/M/X.XLS' sha1 = '3' ) ) ).
+    INSERT VALUE #( path = 'content/bpc/M/X.XLS' ) INTO TABLE content-lfs.
+    INSERT VALUE #( path = 'src/OTHER.XLS' ) INTO TABLE content-lfs.
+    remote->scope_content( CHANGING cs_content = content ).
+    cl_abap_unit_assert=>assert_equals( act = lines( content-files ) exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = content-files[ 1 ]-path exp = 'M/X.XLS' ).
+    cl_abap_unit_assert=>assert_equals( act = content-lfs[ 1 ]-path exp = 'M/X.XLS' ).
+    DATA(legacy) = NEW zcl_bpc_git_remote( iv_url = 'https://bitbucket.org/test/repo' ).
+    cl_abap_unit_assert=>assert_equals( act = legacy->repository_path( 'M/X.XLS' ) exp = 'M/X.XLS' ).
+  ENDMETHOD.
+
+  METHOD rooted_content.
+    DATA(remote) = NEW zcl_bpc_git_remote( iv_url = 'https://bitbucket.org/test/repo' iv_root_folder = 'bpc' ).
+    DATA(data) = cl_abap_codepage=>convert_to( 'workbook bytes' ).
+    INSERT VALUE #( path = '/bpc/M/EEXCEL/REPORTS/' filename = 'X.XLSX' data = data ) INTO TABLE remote->mt_pulled.
+    cl_abap_unit_assert=>assert_equals( act = remote->get_content( 'M/EEXCEL/REPORTS/X.XLSX' ) exp = data ).
+    INSERT VALUE #( path = 'bpc/M/EEXCEL/REPORTS/X.XLSX'
+      pointer = zcl_bpc_git_lfs=>parse( zcl_bpc_git_lfs=>pointer( data ) ) ) INTO TABLE remote->mt_lfs.
+    cl_abap_unit_assert=>assert_equals( act = remote->content_hash( iv_path = 'M/EEXCEL/REPORTS/X.XLSX' iv_data = data )
+      exp = zcl_bpc_git_remote=>blob_sha1( zcl_bpc_git_lfs=>pointer( data ) ) ).
+  ENDMETHOD.
+
+  METHOD invalid_folder.
+    TRY.
+        DATA(remote) = NEW zcl_bpc_git_remote( iv_url = 'https://bitbucket.org/test/repo' iv_root_folder = 'bpc/../src' ).
+        cl_abap_unit_assert=>fail( 'Traversal must be rejected' ).
+      CATCH zcx_abapgit_exception.
+    ENDTRY.
+  ENDMETHOD.
+ENDCLASS.

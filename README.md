@@ -4,7 +4,7 @@ Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
 package links, security definitions, BPF template designs and dimension members.
 The app is a UI5 BSP application, installed with abapGit into package `ZBPC_GIT`.
-Current version: **0.16.2**. Target runtime: ABAP 7.52 and UI5 1.52.
+Current version: **0.17.0**. Target runtime: ABAP 7.52 and UI5 1.52.
 
 Choose an object type and optional model, then **Load**. Select objects to
 commit, restore or inspect their history. EPM reports and input schedules have
@@ -293,3 +293,31 @@ remembered environment and Belize bootstrap theme. The BPCIO host implementation
 is maintained separately; this change prepares the bpcGit side of the contract.
 
 Repository setup offers a branch dropdown. Save the repository URL, then choose **Load branches** (or **Test connection**) to populate it. Private repositories use the existing Git login prompt. Select an existing branch or type a new branch name, then Save. Branch discovery is explicit and does not add startup requests.
+
+## Share a repository with ABAP objects
+
+Set **BPC root folder** in Repository setup to `bpc` (or a nested folder such as
+`content/bpc`). Empty keeps the existing repository-root layout. Leading/trailing
+slashes are removed; folder segments allow letters, digits, underscores and
+hyphens. Comparison, commit, restore, diff, history and LFS all use this folder.
+UI and API object paths remain relative to the BPC root. `GET/POST /config`
+exposes `rootFolder`; clients should include it when saving configuration. Older
+clients omitting the field preserve the saved folder; an explicit empty value
+selects the repository root.
+
+For example, keep ABAP files in `src/` and BPC files in `bpc/`. Configure abapGit
+separately to serialize only its intended ABAP area. bpcGit preserves the full
+Git tree and stages only selected BPC paths. LFS may also update root
+`.gitattributes`, adding rules for the prefixed workbook paths while preserving
+existing entries. Existing nested-attribute restrictions still apply.
+
+For an existing repository, first move its BPC model/security/dimension folders
+into the chosen folder in a separate Git commit, preserving other files and
+updating any LFS rules. Then save the matching BPC root folder in SAP and reload.
+No automatic migration is performed: changing the setting alone makes the old
+root-level files appear absent. Earlier history before the move uses old paths
+and is not automatically followed across the rename. Back up and plan this move
+before changing a populated repository. Changing URL, branch or root folder
+clears the environment's old sync baselines, so a subsequent comparison can
+report differences without an old three-way baseline. Existing single-environment
+per repository restriction remains in place.

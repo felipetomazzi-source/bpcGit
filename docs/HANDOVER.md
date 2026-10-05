@@ -542,3 +542,18 @@ workbook paths; All objects continues to include all supported objects.
 ## Branch selection (0.16.2)
 
 Repository setup uses an editable ComboBox for branches. Load branches reuses the connection endpoint and existing authentication, after saving the repository URL. Connection results populate the dropdown without changing the selected branch. Manual entry supports new or empty repositories. URL changes, saved configuration and environment changes clear old branch results. No automatic network requests are added.
+
+## Configurable BPC root folder (0.17.0)
+
+ZBPC_GIT_REPO gains ROOT_FOLDER (CHAR255); configuration API uses rootFolder.
+Default empty preserves the original layout. Normalized folder segments contain
+letters/digits/underscore/hyphen. Remote maps logical BPC paths to the prefix
+for reads, writes, history and Bitbucket source requests. Public file/hash/LFS
+metadata is scoped and unprefixed; full Git objects/files are retained for push
+so unrelated ABAP files survive. Metadata cache keys include root folder.
+LFS pointer hashes use physical paths internally and root attributes receive
+physical workbook paths. URL/branch/root changes clear old sync state. No file
+migration or rename-following history is implemented; README describes the move.
+Activate the expanded DDIC table before updated classes through abapGit.
+
+Validation: seven Node suites and the UI5 1.52 embedded browser journey pass; the new folder input binds correctly. Formatter/check and JavaScript syntax pass. ADT remote-class syntax check failed HTTP 400, so SAP compilation and added ABAP Unit fixtures remain pending after pull/activation. No SAP source or BPC repository content was changed.

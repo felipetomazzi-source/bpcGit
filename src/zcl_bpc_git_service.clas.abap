@@ -468,6 +468,17 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       RETURN.
     ENDIF.
 
+    DATA(lv_root) = CONV string( is_config-root_folder ).
+    REPLACE REGEX '^/+' IN lv_root WITH ''.
+    REPLACE REGEX '/+$' IN lv_root WITH ''.
+    IF lv_root IS NOT INITIAL.
+      FIND REGEX '^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$' IN lv_root.
+      IF sy-subrc <> 0.
+        rv_message = 'Root folder must contain slash-separated letters, digits, underscores or hyphens'.
+        RETURN.
+      ENDIF.
+    ENDIF.
+
     " One environment per repository: both would write the same paths.
     SELECT SINGLE appset FROM zbpc_git_repo
       WHERE url = @lv_url AND appset <> @is_config-appset
@@ -481,11 +492,17 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       appset     = is_config-appset
       url        = lv_url
       branch     = lv_branch
+      root_folder = lv_root
       lfs_enabled = is_config-lfs_enabled
       lfs_mb = is_config-lfs_mb
       changed_by = sy-uname ).
     GET TIME STAMP FIELD ls_config-changed_at.
+    DATA(ls_previous) = get_config( is_config-appset ).
     MODIFY zbpc_git_repo FROM ls_config.
+    IF ls_previous-url <> ls_config-url OR ls_previous-branch <> ls_config-branch OR
+        ls_previous-root_folder <> ls_config-root_folder.
+      DELETE FROM zbpc_git_state WHERE appset = @is_config-appset.
+    ENDIF.
   ENDMETHOD.
 
   METHOD get_overview.
