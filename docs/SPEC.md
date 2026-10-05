@@ -919,3 +919,7 @@ Host may retain component state on back, and owns container/component destructio
 Outstanding client requests and theme listeners are cleaned up on destruction;
 server writes already underway are not canceled. Standalone behavior is preserved.
 See README for the integration example. No changes to backend or BPCIO repository.
+
+## Branch selection (0.16.2)
+
+Repository setup uses an editable ComboBox for branches. Load branches reuses the connection endpoint and existing authentication, after saving the repository URL. Connection results populate the dropdown without changing the selected branch. Manual entry supports new or empty repositories. URL changes, saved configuration and environment changes clear old branch results. No automatic network requests are added.

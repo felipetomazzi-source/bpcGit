@@ -538,3 +538,7 @@ reports/schedules list their specific library; team listings filter by the
 library directly beneath EEXCEL before comparing content. Git-only files use
 the same classification. Other covers books, distribution lists and remaining
 workbook paths; All objects continues to include all supported objects.
+
+## Branch selection (0.16.2)
+
+Repository setup uses an editable ComboBox for branches. Load branches reuses the connection endpoint and existing authentication, after saving the repository URL. Connection results populate the dropdown without changing the selected branch. Manual entry supports new or empty repositories. URL changes, saved configuration and environment changes clear old branch results. No automatic network requests are added.
