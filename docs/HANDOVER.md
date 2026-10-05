@@ -568,3 +568,7 @@ migration or rename-following history is implemented; README describes the move.
 Activate the expanded DDIC table before updated classes through abapGit.
 
 Validation: seven Node suites and the UI5 1.52 embedded browser journey pass; the new folder input binds correctly. Formatter/check and JavaScript syntax pass. ADT remote-class syntax check failed HTTP 400, so SAP compilation and added ABAP Unit fixtures remain pending after pull/activation. No SAP source or BPC repository content was changed.
+
+## Root folder Save fix (0.17.1)
+
+Form field presence detection is case-insensitive to handle SAP HTTP field-name normalization. Explicit blank rootFolder still clears the setting, while an omitted field preserves the saved setting. ABAP Unit covers uppercase, camel case, mixed case empty and omitted fields. SAP execution remains pending.

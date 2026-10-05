@@ -4,6 +4,9 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PRIVATE SECTION.
     "! Request and response of the current call.
     DATA mo_server TYPE REF TO if_http_server.
+    CLASS-METHODS has_form_field
+      IMPORTING it_fields TYPE tihttpnvp iv_name TYPE string
+      RETURNING VALUE(rv_present) TYPE abap_bool.
     "! Set once read_field has answered with 400; later reads are skipped.
     DATA mv_invalid TYPE abap_bool.
     " Resources served by this handler.
@@ -259,7 +262,7 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     ls_config-branch = lv_branch.
     DATA lt_fields TYPE tihttpnvp.
     mo_server->request->get_form_fields( CHANGING fields = lt_fields ).
-    IF line_exists( lt_fields[ name = 'rootFolder' ] ).
+    IF has_form_field( it_fields = lt_fields iv_name = 'rootFolder' ) = abap_true.
       ls_config-root_folder = read_field( iv_name = 'rootFolder' iv_label = 'BPC root folder'
         iv_max_length = 255 iv_required = abap_false ).
     ELSE.
@@ -736,6 +739,15 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       `,"lfsThresholdMb":` && CONV string( COND i( WHEN is_config-lfs_mb > 0 THEN is_config-lfs_mb ELSE 5 ) ) &&
       `,"changedBy":` && quote( is_config-changed_by ) &&
       `,"changedAt":` && quote( lv_changed_at ) && `}`.
+  ENDMETHOD.
+
+  METHOD has_form_field.
+    LOOP AT it_fields INTO DATA(ls_field).
+      IF to_lower( ls_field-name ) = to_lower( iv_name ).
+        rv_present = abap_true.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD read_field.

@@ -962,3 +962,7 @@ LFS pointer hashes use physical paths internally and root attributes receive
 physical workbook paths. URL/branch/root changes clear old sync state. No file
 migration or rename-following history is implemented; README describes the move.
 Activate the expanded DDIC table before updated classes through abapGit.
+
+## Root folder Save fix (0.17.1)
+
+Form field presence detection is case-insensitive to handle SAP HTTP field-name normalization. Explicit blank rootFolder still clears the setting, while an omitted field preserves the saved setting. ABAP Unit covers uppercase, camel case, mixed case empty and omitted fields. SAP execution remains pending.
