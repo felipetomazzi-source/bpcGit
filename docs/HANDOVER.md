@@ -1,5 +1,146 @@
 # bpcGit: handover
 
+## Current handover — 2026-10-06 (read this before the historical notes)
+
+### Project and working rules
+
+Workspace: `C:/Users/FelipeTomazzi/projects/bpcGit`. Code repository:
+`https://github.com/felipetomazzi-source/bpcGit.git`, branch `main`.
+Application version is **0.17.6**. This code repository is distinct from the
+customer repositories holding serialized BPC content.
+
+Read `AGENTS.md`, this current handover, and `docs/SPEC.md` before implementing.
+Target ABAP 7.52, UI5 1.52 and ES5 JavaScript. Commit and push completed tasks to
+`origin/main` after appropriate checks without asking again. Preserve unrelated
+work. `.dummy_bitbucket` is an untracked local credential file: never commit it,
+print its contents, or copy credentials into documentation. The last observed
+working tree had no tracked changes; only that file was untracked.
+
+Use ADT MCP for SAP code reads/checks. Do not write source directly via ADT or
+other tools. The current AGENTS.md authorizes pulling pushed project code into
+SAP through abapGit; preserve unrelated SAP changes and report conflicts.
+Activation/browser testing remain with the user unless separately authorized.
+Earlier transcript permissions and historical deployment notes do not replace
+these current project rules. Do not create a new agent/chat unless requested.
+
+### Latest pushed changes
+
+| Commit | Result |
+| --- | --- |
+| `1fb2719` | 0.17.4: process affected dimensions after member restores |
+| `dcf076a` | GitHub PAT documentation |
+| `3df99be` | Authorize abapGit pulls in AGENTS.md |
+| `cb16a0f` | 0.17.5: preserve credential-bearing URLs and saved branch |
+| `76951ee` | 0.17.6: reduce invalid CHAR2048 URL field to CHAR1024 |
+| `1538d14` | Align URL XML with SAP serialization; version stays 0.17.6 |
+
+All entries above were pushed to main. The documentation handover update that
+contains this section follows them; use `git log` for its commit identity.
+No successful SAP deployment of these latest backend changes is claimed.
+
+### Current behavior and implementation
+
+Repository setup intentionally stores complete HTTPS `user:token@host` URLs and
+returns them to authorized environment users. This is an explicit user choice;
+do not reintroduce 0.15.3's stripping/import behavior. Explicit tab login
+credentials override embedded credentials for requests. Log out removes only
+the tab login; remove URL credentials by editing the URL and saving.
+
+Remote `parse_repository_url` extracts credentials into request-local fields,
+percent-decodes them, preserves literal plus, colon and equals signs, and cleans
+only the transport URL. Bitbucket API and LFS detection therefore still work.
+Smart HTTP uses Basic; Bitbucket REST uses Bearer for username `x-token-auth`.
+The URL format itself is userinfo, not a Bearer header. Correct Bitbucket form:
+`https://x-token-auth:YOUR_TOKEN@bitbucket.org/WORKSPACE/REPO.git`.
+A missing colon triggers the error shown by the user's latest screenshot;
+that was malformed input, not a new backend defect. Repository exclusivity
+compares addresses without credentials. Diagnostics must not expose tokens.
+
+ZBPC_GIT_REPO URL is now built-in CHAR1024 with internal Unicode length 2048.
+The tested SAP system rejected length 2048 characters (maximum reported 1333).
+The API derives input length from DDIC and rejects overlong input before
+assignment. Canonical URL DD03P ordering from the user's SAP diff is FIELDNAME,
+ADMINFIELD, INTTYPE, INTLEN, DATATYPE, LENG, MASK. MASK is two spaces then CHAR;
+COMPTYPE must be absent. Adding COMPTYPE or omitting MASK causes a persistent
+abapGit diff even after repeated pulls. Do not confuse bytes with characters.
+
+The branch ComboBox binds to `/branches`, separate from `/connection/branches`.
+`_showConfig` seeds the list with the saved branch before configuration binding.
+Connection results include the currently saved/typed branch even if absent from
+advertised branches; changing URL clears stale choices while preserving it.
+No automatic initial branch-network request was introduced.
+
+Dimension member labels show decoded ID plus description, falling back to ID.
+Current/historical member and BPF restores use logical paths, not blob hashes.
+Member restore invokes IF_UJA_MEMBER_MANAGER~PROCESS once per affected dimension
+with validation on and no request to set the environment offline. Failed saves
+skip that dimension's processing. A processing failure reports saved but not
+confirmed active and removes sync baselines; saved changes are not rolled back.
+Processing includes all pending edits in that dimension. Other object types are
+unaffected. Track BPF templates only, never instances. Security tracks teams,
+task profiles and data access profile definitions; users/assignments stay local.
+
+### Entry points and files
+
+Standalone URL: `/sap/bc/ui5_ui5/sap/zbpc_git/index.html?sap-client=<client>`.
+API: `/sap/bc/zbpc_git/`, handler ZCL_BPC_GIT_HTTP. Independent UI5 component:
+namespace `bpc.git`, URL `/sap/bc/ui5_ui5/sap/zbpc_git/`. BPCIO owns the embedded
+shell/header and theme; component supports embedded/environment settings,
+setEnvironment and navigateBack. Preserve standalone operation.
+
+- `src/zbpc_git.wapa.controller_-app.controller.js`: setup, branch list, UI/API.
+- `src/zbpc_git.wapa.view_-app.view.xml`: actual UI5 view and ComboBox binding.
+- `src/zbpc_git_repo.tabl.xml`: URL/root/LFS repository configuration DDIC.
+- `src/zcl_bpc_git_remote.clas.abap`: URL parsing, Git, Bitbucket API, LFS routing.
+- `src/zcl_bpc_git_http.clas.abap`: length validation and credential preflight.
+- `src/zcl_bpc_git_service.clas.abap`: repository validation and restore/process.
+- `tests/repository_login_ui.test.cjs`: URL preservation/branch regressions.
+- `tests/opa/embedded.js`: actual UI5 1.52 component/branch browser checks.
+
+Root folder remains configurable: empty uses legacy repository root; `bpc`
+allows a shared ABAP/BPC repository while preserving unrelated Git files.
+Changing the setting does not move files and clears sync baselines. History
+before a move is not followed automatically. Combining large workbook content
+with ABAP can slow abapGit refresh; path exclusions do not establish partial
+Git transfer. Do not undertake repository migration without a concrete request.
+
+### Validation and immediate follow-up
+
+Seven Node regression suites passed for 0.17.5. Playwright's local actual UI5
+1.52 embedded harness passed **22/22 assertions**, including saved branch,
+advertisements, manual input and config reload. These tests use mocked API data,
+not a live customer SAP system. The 0.17.6 and serializer corrections passed
+formatter/check and targeted XML assertions. The earlier 0.17.4 service syntax
+check passed with pre-existing ABAP Doc warnings. Latest ADT source and syntax
+calls returned HTTP 400, so current backend compilation and ABAP Unit execution
+remain unverified. No credentials or BPC objects were committed during tests.
+
+First establish SAP state: confirm the remote commit includes `1538d14`, the
+CHAR1024 table and dependent classes are active, and Refresh All clears the table
+diff. The user has not yet confirmed that the serializer correction cleared it.
+Then verify Save/reload with a correctly formatted URL, branch persistence,
+connection/branch listing, and Bitbucket history/diff/LFS routing. Confirm member
+restore processing on an authorized test dimension. Live LFS upload/restore is
+still pending; small files below the threshold do not test LFS. If ADT remains
+unavailable, report that instead of treating local tests as SAP syntax checks.
+No additional feature has been selected for implementation yet.
+
+Useful local commands:
+
+```text
+python tools/abapgit_fmt.py
+python tools/abapgit_fmt.py --check
+node --test tests/*.test.cjs
+node tests/opa/server.cjs
+```
+
+Run the formatter after src changes; WAPA lines intentionally contain padding.
+For Git whitespace checks use `git -c core.whitespace=-blank-at-eol diff --check`
+to allow that mandated padding. Browser harness: http://127.0.0.1:4173/embedded.html.
+
+## Historical implementation notes (may describe superseded behavior)
+
+
 Written on 2026-10-03 at the end of the first build session, for the agent
 that continues the work. Read this first, then `docs/SPEC.md`, the
 functional spec. The spec is kept up to date and records every decision with

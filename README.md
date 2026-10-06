@@ -15,6 +15,7 @@ package link and choose **Diff** to compare Git with current BPC text/XML.
 Transformation/conversion workbooks include their companion definitions;
 their Excel content shows a binary change summary, rather than a cell diff.
 
+- Development handover and outstanding checks: [docs/HANDOVER.md](docs/HANDOVER.md)
 - Specification: [docs/SPEC.md](docs/SPEC.md)
 - abapGit objects: `src/`
 - Byte-format helper: `python tools/abapgit_fmt.py` (run with `--check` before
@@ -24,6 +25,39 @@ After pulling with abapGit, the app runs at
 `/sap/bc/ui5_ui5/sap/zbpc_git/index.html?sap-client=<client>`.
 Use this UI5 path, not `/sap/bc/bsp/sap/...`: the BSP runtime rejects host
 names without a domain (`CX_FQDN`), such as `vhcalnplci`.
+
+## Latest updates (0.17.6)
+
+- Credential-bearing repository URLs remain intact on Save and reload. The
+  transport extracts credentials without rewriting the configured address.
+- Credential-bearing URL examples (placeholders only):
+
+```text
+https://x-token-auth:YOUR_BITBUCKET_TOKEN@bitbucket.org/WORKSPACE/REPOSITORY.git
+https://YOUR_GITHUB_USERNAME:YOUR_GITHUB_PAT@github.com/OWNER/REPOSITORY.git
+```
+
+The colon between username and token is required. For example, `x-token-TOKEN`
+without a colon produces **Repository URL credentials must contain user:token**.
+Percent-encode reserved characters inside the username/token, such as `@` as
+`%40`. The credential portion uses HTTP userinfo syntax; do not add `Bearer `.
+
+The saved branch remains visible after refresh and loading branch choices.
+- Repository URL storage is now **CHAR1024**. The initial CHAR2048 definition
+  failed activation on the tested SAP system and has been corrected.
+- The table XML now matches SAP's serialization of the built-in CHAR field
+  (`ADMINFIELD` ordering, `MASK`, no `COMPTYPE`), fixing the repeated table diff.
+  This last correction does not change the field's type or length.
+- Dimension member labels show **ID - description**. Restores retrieve members
+  and BPF templates by path; restored members are saved and processed once per
+  affected dimension. Processing may activate other pending edits in that
+  dimension; other object types do not trigger dimension processing.
+
+Seven local regression suites and 22 UI5 1.52 browser assertions passed for the
+URL/branch changes. Subsequent table corrections passed formatter and XML
+checks. ADT returned HTTP 400 for the latest backend syntax checks. Latest SAP
+activation, clean abapGit status and live URL/branch behavior need confirmation;
+local checks do not establish SAP deployment success.
 
 ## Repository setup and login
 
@@ -107,7 +141,7 @@ Base path: `/sap/bc/zbpc_git` (handler `ZCL_BPC_GIT_HTTP`)
 | GET | `/models?environment=<id>` | Authorized models; no Git pull or file comparison |
 | GET | `/dimensions?environment=<id>` | Supported accessible dimensions; no member scan or Git comparison |
 | GET | `/config?environment=<id>` | Repository setup of an environment |
-| POST | `/config` | Save it (`environment`, `url`, `branch`; optional `lfsEnabled`, `lfsThresholdMb`) |
+| POST | `/config` | Save it (`environment`, `url`, `branch`; optional `rootFolder`, `lfsEnabled`, `lfsThresholdMb`) |
 | POST | `/connection` | Test the connection (`environment`; optional `user`, `token`) |
 | POST | `/diagnostics` | Independent smart-HTTP read/push-advertisement checks (`environment`; optional `user`, `token`); no Git/BPC write |
 | POST | `/workbooks` | Tracked files in BPC and Git with their status (`environment`; optional `kind`, `model`, `dimension`, `user`, `token`); returns stage timings |
@@ -116,7 +150,8 @@ Base path: `/sap/bc/zbpc_git` (handler `ZCL_BPC_GIT_HTTP`)
 | POST | `/history` | Changes to one item (`environment`, `path`; optional `depth`, `user`, `token`) |
 | POST | `/diff` | Current Git/BPC content for one supported item (`environment`, `path`; optional `user`, `token`) |
 
-Git login works as in abapGit: requests go without credentials first. When the
+With no saved URL credentials or explicit tab login, Git requests first run
+without credentials. When the
 Git host wants a login, the API answers 403 with `"authRequired": true` and the
 app asks for user and personal access token, keeps the token in the browser tab's `sessionStorage`,
 and retries. Only the explicit login user name persists in `localStorage`; tab credentials are
@@ -135,8 +170,7 @@ REST URL/auth metadata are also returned, with `restChecked=false`.
 Smart HTTP uses abapGit's request-local Basic login; Bitbucket REST reads use
 Bearer for `x-token-auth`, Basic for other usernames. `ZBPC_GIT_REPO` stores
 repository settings, including intentionally embedded URL credentials. There is
-no environment-keyed secure
-store, SSF lookup or shared browser abapGit login in this service. The constructor
+no environment-keyed secure store, SSF lookup or shared browser abapGit login in this service. The constructor
 clears the login manager before setting the supplied request credentials.
 Both Git-host 401 and 403 now produce `authRequired=true`; a 403 can also mean
 insufficient repository permission, so it does not prove a bad password.
