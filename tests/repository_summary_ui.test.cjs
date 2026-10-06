@@ -26,3 +26,17 @@ const view = fs.readFileSync('src/zbpc_git.wapa.view_-app.view.xml', 'utf8');
 assert.ok(view.indexOf('id="repositoryPanel"') < view.indexOf('id="loadType"'), 'Repository setup precedes the object list');
 assert.ok(view.indexOf('id="branchSummary"') < view.indexOf('id="setupForm"'), 'Branch summary sits in the panel header');
 console.log('repository summary: ok');
+
+// "Change" expands the setup panel and focuses the branch after the animation.
+{
+  const calls = [];
+  let done;
+  const panel = { setExpanded: v => calls.push('expand:' + v),
+    $: () => ({ children: sel => { calls.push('children:' + sel); return { promise: () => ({ done: f => { done = f; } }) }; } }) };
+  const branch = { focus: () => calls.push('focus') };
+  methods.onChangeRepository.call({ byId: id => ({ repositoryPanel: panel, branchInput: branch })[id] });
+  assert.deepEqual(calls, ['expand:true', 'children:.sapMPanelContent']);
+  done();
+  assert.equal(calls[2], 'focus');
+  assert.ok(view.includes('press=".onChangeRepository"'));
+}

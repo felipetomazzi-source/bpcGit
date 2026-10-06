@@ -6,7 +6,7 @@
 
 Workspace: `C:/Users/FelipeTomazzi/projects/bpcGit`. Code repository:
 `https://github.com/felipetomazzi-source/bpcGit.git`, branch `main`.
-Application version is **0.17.8**. This code repository is distinct from the
+Application version is **0.17.9**. This code repository is distinct from the
 customer repositories holding serialized BPC content.
 
 Read `AGENTS.md`, this current handover, and `docs/SPEC.md` before implementing.
@@ -792,3 +792,11 @@ and saved branch (`/savedRepositoryLabel`, `/savedBranch`, set in
 `_showConfig`, cleared on environment change), not the unsaved edit values.
 UI5 1.52 has no ValueState "Information"; use None. Node 8/8, OPA 7/7 and
 embedded 22/22 pass on actual UI5 1.52 with mock API data.
+
+## Change link (0.17.9, 2026-10-06)
+
+The Repository setup header has a "Change" Link (visible when configured).
+`onChangeRepository` expands the panel and focuses `branchInput` after the
+1.52 slideToggle animation via `$().children(".sapMPanelContent").promise()`
+(1.52 Panel content has no DOM id). Verified on UI5 1.52 harness: expands,
+focus lands on the branch input; OPA 7/7, embedded 22/22, Node 8/8.
