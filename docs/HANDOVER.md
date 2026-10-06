@@ -6,7 +6,7 @@
 
 Workspace: `C:/Users/FelipeTomazzi/projects/bpcGit`. Code repository:
 `https://github.com/felipetomazzi-source/bpcGit.git`, branch `main`.
-Application version is **0.17.6**. This code repository is distinct from the
+Application version is **0.17.7**. This code repository is distinct from the
 customer repositories holding serialized BPC content.
 
 Read `AGENTS.md`, this current handover, and `docs/SPEC.md` before implementing.
@@ -767,3 +767,17 @@ COMPTYPE is absent. Aligned only the URL DD03P XML with that observed output.
 Field type and length stay CHAR1024; this corrects a persistent serialization
 diff rather than changing the table layout. Formatter and XML assertions pass.
 Confirmation that refresh clears the diff remains with the user in SAP.
+
+## LFS pointer parse fix (0.17.7, 2026-10-06)
+
+SAP state confirmed via ADT: ZBPC_GIT_REPO is active with URL CHAR1024 and no
+ZBPC_GIT objects are inactive. abapGit pull of main (transport NPLK900106,
+which already held the table) succeeded with no changes after `1538d14`.
+ADT source reads, syntax checks and ABAP Unit work again.
+
+ABAP Unit on SAP exposed a real defect: `ZCL_BPC_GIT_LFS=>parse` expected four
+SPLIT segments with an empty last one, but ABAP SPLIT creates no segment for a
+trailing separator. Every canonical pointer, including our own `pointer( )`
+output, was rejected, so LFS upload/download/comparison could never work.
+Parse now requires three lines and an exact canonical text match (rejecting
+extension lines and a missing final newline). Regression tests added.

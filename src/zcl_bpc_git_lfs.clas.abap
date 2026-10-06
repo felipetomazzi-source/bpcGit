@@ -100,9 +100,10 @@ CLASS zcl_bpc_git_lfs IMPLEMENTATION.
     TRY.
         DATA(lv_text) = cl_abap_codepage=>convert_from( iv_data ).
         DATA lt_lines TYPE string_table.
+        " SPLIT creates no empty segment for the trailing newline; the exact
+        " canonical comparison below rejects extra lines and missing newlines.
         SPLIT lv_text AT cl_abap_char_utilities=>newline INTO TABLE lt_lines.
-        IF lines( lt_lines ) <> 4 OR lt_lines[ 1 ] <> 'version https://git-lfs.github.com/spec/v1'
-            OR lt_lines[ 4 ] IS NOT INITIAL.
+        IF lines( lt_lines ) <> 3 OR lt_lines[ 1 ] <> 'version https://git-lfs.github.com/spec/v1'.
           zcx_abapgit_exception=>raise( 'Invalid or extended Git LFS pointer; only canonical SHA-256 pointers are supported' ).
         ENDIF.
         FIND REGEX '^oid sha256:([0-9a-f]{64})$' IN lt_lines[ 2 ] SUBMATCHES rs_pointer-oid.
@@ -113,6 +114,11 @@ CLASS zcl_bpc_git_lfs IMPLEMENTATION.
         FIND REGEX '^size (0|[1-9][0-9]*)$' IN lt_lines[ 3 ] SUBMATCHES lv_size.
         IF sy-subrc <> 0.
           zcx_abapgit_exception=>raise( 'Invalid Git LFS object size' ).
+        ENDIF.
+        IF lv_text <> |version https://git-lfs.github.com/spec/v1{ cl_abap_char_utilities=>newline }| &&
+            |oid sha256:{ rs_pointer-oid }{ cl_abap_char_utilities=>newline }| &&
+            |size { lv_size }{ cl_abap_char_utilities=>newline }|.
+          zcx_abapgit_exception=>raise( 'Invalid or extended Git LFS pointer; only canonical SHA-256 pointers are supported' ).
         ENDIF.
         rs_pointer-size = lv_size.
         IF rs_pointer-size > c_max_bytes.

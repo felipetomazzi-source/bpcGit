@@ -67,6 +67,20 @@ CLASS ltcl_lfs IMPLEMENTATION.
         cl_abap_unit_assert=>fail( 'Malformed pointer must not be restored as workbook bytes' ).
       CATCH zcx_abapgit_exception.
     ENDTRY.
+    " A canonical pointer followed by an extra (extension) line is rejected.
+    TRY.
+        zcl_bpc_git_lfs=>parse( cl_abap_codepage=>convert_to( cl_abap_codepage=>convert_from(
+          zcl_bpc_git_lfs=>pointer( cl_abap_codepage=>convert_to( 'abc' ) ) ) && 'ext 0' && cl_abap_char_utilities=>newline ) ).
+        cl_abap_unit_assert=>fail( 'Extended pointer must be rejected' ).
+      CATCH zcx_abapgit_exception.
+    ENDTRY.
+    " The trailing newline is part of the canonical pointer.
+    TRY.
+        DATA(text) = cl_abap_codepage=>convert_from( zcl_bpc_git_lfs=>pointer( cl_abap_codepage=>convert_to( 'abc' ) ) ).
+        zcl_bpc_git_lfs=>parse( cl_abap_codepage=>convert_to( substring( val = text len = strlen( text ) - 1 ) ) ).
+        cl_abap_unit_assert=>fail( 'Pointer without final newline must be rejected' ).
+      CATCH zcx_abapgit_exception.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD workbook_scope.
