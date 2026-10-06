@@ -6,7 +6,7 @@
 
 Workspace: `C:/Users/FelipeTomazzi/projects/bpcGit`. Code repository:
 `https://github.com/felipetomazzi-source/bpcGit.git`, branch `main`.
-Application version is **0.17.7**. This code repository is distinct from the
+Application version is **0.17.8**. This code repository is distinct from the
 customer repositories holding serialized BPC content.
 
 Read `AGENTS.md`, this current handover, and `docs/SPEC.md` before implementing.
@@ -781,3 +781,14 @@ trailing separator. Every canonical pointer, including our own `pointer( )`
 output, was rejected, so LFS upload/download/comparison could never work.
 Parse now requires three lines and an exact canonical text match (rejecting
 extension lines and a missing final newline). Regression tests added.
+
+## Repository summary at top (0.17.8, 2026-10-06)
+
+User request: long object lists pushed Repository setup out of reach and the
+current branch was not visible. The setup Panel moved above the load controls
+(Installation check stays at the bottom). Its headerToolbar shows the saved
+repository label (scheme, userinfo and ".git" stripped by `repositoryLabel`)
+and saved branch (`/savedRepositoryLabel`, `/savedBranch`, set in
+`_showConfig`, cleared on environment change), not the unsaved edit values.
+UI5 1.52 has no ValueState "Information"; use None. Node 8/8, OPA 7/7 and
+embedded 22/22 pass on actual UI5 1.52 with mock API data.
