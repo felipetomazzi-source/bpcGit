@@ -60,6 +60,46 @@ sap.ui.getCore().attachInit(function () {
         });
       });
     });
+    QUnit.test('Saved branch survives UI5 1.52 item changes', function (assert) {
+      var done = assert.async();
+      var component = sap.ui.component({ name: 'bpc.git', url: '/app/', settings: { embedded: true, environment: 'HOST_A' } });
+      var container = new ComponentContainer({ component: component });
+      container.placeAt('qunit-fixture');
+      var attempts = 0;
+      function check() {
+        var model = component.getModel('app');
+        if (!model.getProperty('/configured')) {
+          if (++attempts < 100) { setTimeout(check, 50); return; }
+          assert.ok(false, 'Configuration loaded'); container.destroy(); component.destroy(); done(); return;
+        }
+        var controller = component.getRootControl().getController();
+        var branch = component.getRootControl().byId('branchInput');
+        controller._showConfig({ configured: true, url: 'https://example.invalid/repo.git', branch: 'release/test' });
+        sap.ui.getCore().applyChanges();
+        setTimeout(function () {
+          assert.strictEqual(branch.getValue(), 'release/test', 'Saved branch displayed before loading branches');
+          model.setProperty('/connection', null);
+          model.setProperty('/branches', ['release/test', 'main', 'feature/new']);
+          sap.ui.getCore().applyChanges();
+          setTimeout(function () {
+            assert.strictEqual(branch.getValue(), 'release/test', 'Advertisements preserve branch');
+            assert.strictEqual(model.getProperty('/config/branch'), 'release/test', 'Saved branch remains in model');
+            branch.setValue('feature/typed');
+            branch.fireChange({ value: 'feature/typed' });
+            model.setProperty('/connection', null);
+            sap.ui.getCore().applyChanges();
+            assert.strictEqual(branch.getValue(), 'feature/typed', 'Clearing connection preserves manual branch entry');
+            controller._showConfig({ configured: true, url: 'https://example.invalid/repo.git', branch: 'release/test' });
+            sap.ui.getCore().applyChanges();
+            setTimeout(function () {
+              assert.strictEqual(branch.getValue(), 'release/test', 'Configuration refresh restores saved branch');
+              container.destroy(); component.destroy(); done();
+            }, 0);
+          }, 0);
+        }, 0);
+      }
+      check();
+    });
     QUnit.start();
   });
 });

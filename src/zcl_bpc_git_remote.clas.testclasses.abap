@@ -131,12 +131,35 @@ ENDCLASS.
 
 CLASS ltcl_root_folder DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
   PRIVATE SECTION.
+    METHODS url_credentials FOR TESTING RAISING zcx_abapgit_exception.
     METHODS mapping_and_scope FOR TESTING RAISING zcx_abapgit_exception.
     METHODS rooted_content FOR TESTING RAISING zcx_abapgit_exception.
     METHODS invalid_folder FOR TESTING.
 ENDCLASS.
 
 CLASS ltcl_root_folder IMPLEMENTATION.
+  METHOD url_credentials.
+    DATA(url) = `https://user%40example.com:fake+token%3Apart=one@bitbucket.org/test/repo.git`.
+    DATA(remote) = NEW zcl_bpc_git_remote( iv_url = url ).
+    cl_abap_unit_assert=>assert_equals( act = remote->mv_url exp = 'https://bitbucket.org/test/repo.git' ).
+    cl_abap_unit_assert=>assert_equals( act = remote->mv_cache_user exp = 'user@example.com' ).
+    cl_abap_unit_assert=>assert_equals( act = remote->mv_token exp = 'fake+token:part=one' ).
+    cl_abap_unit_assert=>assert_equals( act = remote->mv_bitbucket_api
+      exp = 'https://api.bitbucket.org/2.0/repositories/test/repo' ).
+    cl_abap_unit_assert=>assert_true( remote->mv_has_credentials ).
+    remote = NEW zcl_bpc_git_remote( iv_url = url iv_user = 'override' iv_token = 'fake-override' ).
+    cl_abap_unit_assert=>assert_equals( act = remote->mv_cache_user exp = 'override' ).
+    cl_abap_unit_assert=>assert_equals( act = remote->mv_token exp = 'fake-override' ).
+    remote = NEW zcl_bpc_git_remote( iv_url = 'https://github.com/test/repo.git' ).
+    cl_abap_unit_assert=>assert_initial( remote->mv_token ).
+    TRY.
+        remote = NEW zcl_bpc_git_remote( iv_url = 'https://user:@github.com/test/repo.git' ).
+        cl_abap_unit_assert=>fail( 'Empty embedded token must fail before a request' ).
+      CATCH zcx_abapgit_exception.
+    ENDTRY.
+    zcl_abapgit_login_manager=>clear( ).
+  ENDMETHOD.
+
   METHOD mapping_and_scope.
     DATA(remote) = NEW zcl_bpc_git_remote( iv_url = 'https://bitbucket.org/test/repo' iv_root_folder = '/content/bpc/' ).
     cl_abap_unit_assert=>assert_equals( act = remote->repository_path( 'M/EEXCEL/REPORTS/X.XLSX' )

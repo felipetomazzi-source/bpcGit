@@ -586,3 +586,23 @@ Member/BPF restore now requests Git content by logical file path, as required by
 ADT confirmed IF_UJA_MEMBER_MANAGER~PROCESS parameters and CL_UJAM_MEMBER implementation. Member restore now calls processing once per affected dimension after saves, with validation enabled and without requesting the environment offline. Failed member saves skip processing for their dimension. Processing failure changes saved-member outcomes to unsuccessful with an explicit saved-but-not-active message and clears sync records; already saved changes are not claimed rolled back. Processing covers the entire dimension including other pending member edits; UI warns accordingly. Current/historical restores share the path. Other object types unchanged. Live activation validation remains pending.
 
 Validation: ADT syntax check of the complete updated service class passed with no errors (existing ABAP Doc warnings only). Seven Node regression suites and formatter/check passed. No SAP source or member data was written; actual dimension processing is pending user abapGit activation and restore testing.
+
+## Repository setup persistence (0.17.5, 2026-10-06)
+
+User requested preserving credential-bearing URLs instead of importing them
+into the tab login and stripping them. Configuration now stores/returns the
+complete URL (CHAR2048). Request-local transport extracts credentials and uses
+a clean address so Bitbucket history/diff/LFS detection remains available.
+Explicit tab credentials override embedded credentials. Repository exclusivity
+compares clean addresses. Branch choices now live separately from connection
+results and include the saved/typed branch after config reload and branch reads.
+
+Verification: all seven Node regression suites pass. Playwright's actual UI5
+1.52 component harness passes 22 assertions, including saved branch display,
+branch advertisements, manual entry, connection clearing and config refresh.
+Formatter and diff checks pass. Added ABAP Unit cases for URL decoding, literal
+plus/colon/equals preservation, clean Bitbucket API detection, request credential
+precedence and empty-token rejection. ADT source read and syntax check both
+returned HTTP 400, so SAP syntax/ABAP Unit execution and activation remain
+unverified. Pull/activate the DDIC URL expansion, remote class, dependent HTTP/
+service classes and BSP together before testing URL Save/reload in SAP.

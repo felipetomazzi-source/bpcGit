@@ -113,6 +113,10 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS get_author
       IMPORTING iv_user TYPE syuname iv_git_user TYPE string OPTIONAL
       EXPORTING ev_name TYPE string ev_email TYPE string.
+    CLASS-METHODS parse_repository_url
+      IMPORTING iv_url TYPE csequence
+      EXPORTING ev_url TYPE string ev_user TYPE string ev_token TYPE string
+      RAISING zcx_abapgit_exception.
     METHODS constructor
       IMPORTING iv_url TYPE csequence
                 iv_user TYPE string OPTIONAL
@@ -334,6 +338,34 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     cs_content-lfs = lt_lfs.
   ENDMETHOD.
 
+  METHOD parse_repository_url.
+    ev_url = iv_url.
+    CLEAR: ev_user, ev_token.
+    DATA lv_login TYPE string.
+    DATA lv_host TYPE string.
+    DATA lv_path TYPE string.
+    FIND REGEX '^https://([^/]+)@([^/]+)(/.*)$' IN ev_url
+      SUBMATCHES lv_login lv_host lv_path.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    FIND FIRST OCCURRENCE OF ':' IN lv_login MATCH OFFSET DATA(lv_colon).
+    IF sy-subrc <> 0 OR lv_colon = 0.
+      zcx_abapgit_exception=>raise( 'Repository URL credentials must contain user:token' ).
+    ENDIF.
+    DATA(lv_user) = substring( val = lv_login len = lv_colon ).
+    DATA(lv_token) = substring( val = lv_login off = lv_colon + 1 ).
+    " URL userinfo uses literal plus, unlike form-encoded query parameters.
+    REPLACE ALL OCCURRENCES OF '+' IN lv_user WITH '%2B'.
+    REPLACE ALL OCCURRENCES OF '+' IN lv_token WITH '%2B'.
+    ev_user = cl_http_utility=>unescape_url( lv_user ).
+    ev_token = cl_http_utility=>unescape_url( lv_token ).
+    IF ev_token IS INITIAL.
+      zcx_abapgit_exception=>raise( 'Repository URL token must not be empty' ).
+    ENDIF.
+    ev_url = |https://{ lv_host }{ lv_path }|.
+  ENDMETHOD.
+
   METHOD constructor.
     mv_root = iv_root_folder.
     REPLACE REGEX '^/+' IN mv_root WITH ''.
@@ -345,9 +377,12 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       ENDIF.
       mv_root = mv_root && '/'.
     ENDIF.
-    mv_url = iv_url.
-    mv_cache_user = iv_user.
-    mv_token = iv_token.
+    parse_repository_url( EXPORTING iv_url = iv_url
+      IMPORTING ev_url = mv_url ev_user = mv_cache_user ev_token = mv_token ).
+    IF iv_user IS NOT INITIAL AND iv_token IS NOT INITIAL.
+      mv_cache_user = iv_user.
+      mv_token = iv_token.
+    ENDIF.
     mv_lfs_enabled = iv_lfs_enabled.
     IF iv_lfs_mb < 1 OR iv_lfs_mb > 100.
       zcx_abapgit_exception=>raise( 'Git LFS threshold must be between 1 and 100 MB' ).
@@ -362,10 +397,10 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       mv_bitbucket_api = |https://api.bitbucket.org/2.0/repositories/{ lv_workspace }/{ lv_repository }|.
     ENDIF.
     zcl_abapgit_login_manager=>clear( ).
-    IF iv_user IS NOT INITIAL AND iv_token IS NOT INITIAL.
+    IF mv_cache_user IS NOT INITIAL AND mv_token IS NOT INITIAL.
       zcl_abapgit_login_manager=>set_basic( iv_uri = mv_url
-                                            iv_username = iv_user
-                                            iv_password = iv_token ).
+                                            iv_username = mv_cache_user
+                                            iv_password = mv_token ).
       mv_has_credentials = abap_true.
     ENDIF.
   ENDMETHOD.

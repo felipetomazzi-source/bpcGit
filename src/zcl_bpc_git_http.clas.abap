@@ -709,7 +709,12 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
                      iv_message = 'Save the repository setup first' ).
       RETURN.
     ENDIF.
-    ev_with_login = xsdbool( lv_user IS NOT INITIAL AND lv_token IS NOT INITIAL ).
+    DATA lv_url_user TYPE string.
+    DATA lv_url_token TYPE string.
+    zcl_bpc_git_remote=>parse_repository_url( EXPORTING iv_url = es_config-url
+      IMPORTING ev_user = lv_url_user ev_token = lv_url_token ).
+    ev_with_login = xsdbool( ( lv_user IS NOT INITIAL AND lv_token IS NOT INITIAL )
+      OR ( lv_url_user IS NOT INITIAL AND lv_url_token IS NOT INITIAL ) ).
     eo_remote = NEW zcl_bpc_git_remote( iv_url = es_config-url iv_user = lv_user iv_token = lv_token
       iv_root_folder = CONV string( es_config-root_folder ) iv_lfs_enabled = es_config-lfs_enabled iv_lfs_mb = COND #( WHEN es_config-lfs_mb > 0 THEN es_config-lfs_mb ELSE 5 ) ).
   ENDMETHOD.

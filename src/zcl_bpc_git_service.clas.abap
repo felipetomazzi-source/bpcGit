@@ -449,6 +449,14 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       RETURN.
     ENDIF.
 
+    DATA lv_clean_url TYPE string.
+    TRY.
+        zcl_bpc_git_remote=>parse_repository_url( EXPORTING iv_url = lv_url IMPORTING ev_url = lv_clean_url ).
+      CATCH zcx_abapgit_exception INTO DATA(lx_url).
+        rv_message = lx_url->get_text( ).
+        RETURN.
+    ENDTRY.
+
     DATA(lv_branch) = condense( CONV string( is_config-branch ) ).
     IF lv_branch IS INITIAL.
       lv_branch = c_default_branch.
@@ -463,7 +471,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     ENDIF.
 
     IF is_config-lfs_enabled = abap_true.
-      FIND REGEX '^https://bitbucket[.]org/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?$' IN lv_url.
+      FIND REGEX '^https://bitbucket[.]org/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?$' IN lv_clean_url.
       IF sy-subrc <> 0.
         rv_message = 'Git LFS currently supports Bitbucket Cloud repositories only'.
         RETURN.
@@ -486,13 +494,19 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     ENDIF.
 
     " One environment per repository: both would write the same paths.
-    SELECT SINGLE appset FROM zbpc_git_repo
-      WHERE url = @lv_url AND appset <> @is_config-appset
-      INTO @DATA(lv_other).
-    IF sy-subrc = 0.
-      rv_message = |This repository is already used by environment { lv_other }|.
-      RETURN.
-    ENDIF.
+    SELECT appset, url FROM zbpc_git_repo WHERE appset <> @is_config-appset INTO TABLE @DATA(lt_other).
+    LOOP AT lt_other INTO DATA(ls_other).
+      DATA lv_other_url TYPE string.
+      TRY.
+          zcl_bpc_git_remote=>parse_repository_url( EXPORTING iv_url = ls_other-url IMPORTING ev_url = lv_other_url ).
+        CATCH zcx_abapgit_exception.
+          lv_other_url = ls_other-url.
+      ENDTRY.
+      IF lv_other_url = lv_clean_url.
+        rv_message = |This repository is already used by environment { ls_other-appset }|.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
 
     DATA(ls_config) = VALUE zbpc_git_repo(
       appset     = is_config-appset

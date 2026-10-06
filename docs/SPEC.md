@@ -14,8 +14,9 @@ an explicit unknown source. Success requires HTTP 200 plus a valid advertisement
 REST target/scheme are descriptive only (`restChecked=false`). Do not infer an
 actual intercepted Authorization header from the intended scheme.
 
-Credentials are request-local, not stored under an environment ID in a table,
-SSF or secure store. Git-host HTTP 401 and HTTP 403 are both authorization
+Explicit login credentials are request-local. Since 0.17.5, intentionally
+embedded URL credentials are stored with the environment repository URL; no
+separate SSF or secure-store lookup is performed. Git-host HTTP 401 and HTTP 403 are both authorization
 failures for the existing login response; distinguish absent credentials from
 present credentials with `credentialFound`. A present credential plus 403 can
 mean invalid credentials or insufficient permission. No raw headers, token,
@@ -26,17 +27,25 @@ proxy configuration and optional exits. Runtime SM59/STRUST/proxy inspection is
 separate from this endpoint. Bitbucket REST history/diff use their existing
 direct HTTP client path and must not be conflated with smart-HTTP preflight.
 
-## Repository URL login import (0.15.3)
+## Repository URL credentials and saved branch (0.17.5)
 
-The setup URL field accepts pasted HTTPS URLs containing `user:token@host`.
-On field change and again before Save, the UI removes the credentials from the
-URL and imports them through the existing tab-session login mechanism. Only the
-clean repository address is sent in the configuration request and saved in SAP.
-Percent-encoded credentials are decoded; token colons and equals signs are
-preserved. Missing or malformed credentials are removed and a message directs
-the user to Log in. The input permits long tokens without truncating them;
-the saved repository address remains subject to the existing backend limits.
-This does not validate the token; Test connection still checks Git access.
+Setup preserves intentionally supplied HTTPS `user:token@host` URLs on field
+change, Save and reload. This supersedes 0.15.3's URL stripping and tab-login
+import. ZBPC_GIT_REPO URL is CHAR2048; the configuration endpoint uses the DDIC
+length to reject overlong input before assigning it. Authorized environment
+users receive the stored URL including credentials in configuration responses.
+
+Only the request-local remote transport URL is cleaned. Credentials are decoded
+and used for smart HTTP, Bitbucket API and LFS. Explicit request user/token take
+precedence. Diagnostics keep tokens out of their output. The one-environment
+per-repository check compares addresses without credentials, so credential
+changes cannot bypass it. Removing a tab login does not remove URL credentials.
+
+The branch ComboBox uses a separate branches list seeded with the saved branch
+before configuration binding. Connection results extend that list while keeping
+the selected or typed branch, even if not advertised. Clearing connection state
+must not clear the branch. Existing manual entry and standalone/embedded reload
+behavior remain supported.
 
 ## Text diff (0.15.0)
 
@@ -230,7 +239,8 @@ content is hashed on each comparison because the tables have no timestamps.
 2. The user enters:
    - Repository URL (`https://github.com/<owner>/<repo>`)
    - Branch (default `main`)
-3. **Save** stores the configuration. No credentials are stored.
+3. **Save** stores the configuration, including any intentionally embedded URL
+   credentials. Explicit Log in credentials remain in the browser tab only.
 4. **Test connection** calls `ZCL_ABAPGIT_GIT_TRANSPORT=>BRANCHES`. This checks
    the SSL setup and read access, and shows whether the branch exists. With a
    Git login (section 7.2) it also checks push access by asking for the

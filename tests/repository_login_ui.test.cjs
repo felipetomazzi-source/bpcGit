@@ -4,41 +4,40 @@ const vm = require('node:vm');
 let methods;
 vm.runInNewContext(fs.readFileSync('src/zbpc_git.wapa.controller_-app.controller.js', 'utf8'), {
   sap: { ui: { define: (names, factory) => factory.apply(null, names.map(name =>
-    name.endsWith('/Controller') ? { extend: (name, m) => { methods = m; } } : function () {})) } }
+    name.endsWith('/Controller') ? { extend: (name, m) => { methods = m; } } : { show() {} })) } }
 });
-function check(url, clean, user, token, valid = true) {
-  const data = { '/config/url': url };
-  let credentials;
-  const context = { _model: { getProperty: p => data[p], setProperty: (p, v) => { data[p] = v; } },
-    _setCredentials: c => { credentials = c; } };
-  assert.equal(methods._importRepositoryLogin.call(context), valid);
-  assert.equal(data['/config/url'], clean);
-  if (user) { assert.equal(credentials.user, user); assert.equal(credentials.token, token); }
-  else { assert.equal(credentials, undefined); }
-}
-check('https://x-token-auth:fake=token:part@bitbucket.org/w/r.git',
-  'https://bitbucket.org/w/r.git', 'x-token-auth', 'fake=token:part');
-check('https://user%40example.com:a%40b%3Ac%25@host/r.git',
-  'https://host/r.git', 'user@example.com', 'a@b:c%');
-const longToken = 'fake'.repeat(150);
-check('https://user:' + longToken + '@host/r.git', 'https://host/r.git', 'user', longToken);
-check('https://host/r.git', 'https://host/r.git');
-check('https://user@host/r.git', 'https://host/r.git', null, null, false);
-check('https://user:%ZZ@host/r.git', 'https://host/r.git', null, null, false);
-assert.match(methods.onSave.toString(), /_importRepositoryLogin/);
-const config = { url: 'https://user:fake-secret@host/r.git', branch: 'main' };
-let saved;
-const saveContext = {
-  _model: {
-    getProperty: p => p === '/config' ? config : p === '/config/url' ? config.url : 'ENV',
-    setProperty: (p, value) => { if (p === '/config/url') { config.url = value; } }
-  },
-  _importRepositoryLogin: methods._importRepositoryLogin,
-  _setCredentials: () => {},
-  _request: (resource, body) => { saved = body; return { then: () => {} }; },
-  _setupFailed: () => {}
-};
-methods.onSave.call(saveContext);
-assert.equal(saved.url, 'https://host/r.git');
-assert.ok(!JSON.stringify(saved).includes('fake-secret'), 'configuration payload contains no token');
-console.log('Repository URL login tests passed');
+(async function () {
+  const urls = [
+    'https://x-token-auth:fake=token:part@bitbucket.org/w/r.git',
+    'https://user%40example.com:a%40b%3Ac%25@host/r.git',
+    'https://user:' + 'fake'.repeat(150) + '@github.com/owner/repo.git'
+  ];
+  for (const url of urls) {
+    const data = { config: { url, branch: 'release/test' }, environment: 'ENV' };
+    const context = Object.assign({}, methods, {
+      _model: {
+        getProperty: p => p.slice(1).split('/').reduce((o, key) => o && o[key], data),
+        setProperty: (p, value) => { const keys = p.slice(1).split('/'); const last = keys.pop();
+          keys.reduce((o, key) => o[key], data)[last] = value; }
+      },
+      onLoadScopeChange() {}, _loadModels() {},
+      _setCredentials() { throw new Error('URL credentials must remain in the configured URL'); }
+    });
+    context.onRepositoryUrlChange();
+    assert.equal(data.config.url, url);
+    let sent;
+    context._request = async (resource, body) => { sent = body; return Object.assign({ configured: true }, body); };
+    context.onSave(); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(sent.url, url);
+    assert.equal(data.config.url, url, 'Save response preserves the URL');
+    assert.equal(data.config.branch, 'release/test');
+    assert.deepEqual(Array.from(data.branches), ['release/test'], 'Saved branch remains an option after reload');
+    context._gitRequest = async () => ({ branches: ['main', 'feature/new'] });
+    context._testConnection(); await new Promise(resolve => setImmediate(resolve));
+    assert.equal(data.config.branch, 'release/test', 'Branch advertisement must not erase the configured branch');
+    assert.deepEqual(Array.from(data.branches), ['release/test', 'main', 'feature/new']);
+    context.onRepositoryUrlChange();
+    assert.equal(data.config.branch, 'release/test');
+  }
+  console.log('Repository URL preservation and branch reload checks passed');
+})();

@@ -4,7 +4,7 @@ Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
 package links, security definitions, BPF template designs and dimension members.
 The app is a UI5 BSP application, installed with abapGit into package `ZBPC_GIT`.
-Current version: **0.17.4**. Target runtime: ABAP 7.52 and UI5 1.52.
+Current version: **0.17.5**. Target runtime: ABAP 7.52 and UI5 1.52.
 
 Choose an object type and optional model, then **Load**. Select objects to
 commit, restore or inspect their history. EPM reports and input schedules have
@@ -32,18 +32,25 @@ URL and branch, then **Save** and **Test connection**. Regular Git access uses
 abapGit; Bitbucket Cloud also has dedicated History and Diff API reads. Other
 Git hosts retain the abapGit read path.
 
-Use **Log in** for your Git username and token. Pasting a URL containing
-`user:token@host` imports that login into the current tab and removes the
-credentials from the saved URL. Prefer a clean URL such as
-`https://bitbucket.org/<workspace>/<repository>.git`. For a Bitbucket repository
-access token, use `x-token-auth` as the username; for a Bitbucket API token, use
-your Atlassian account email. Tokens need the relevant repository/API permissions.
+Use **Log in** for request-local Git credentials, or intentionally include
+`user:token@host` in the repository URL. bpcGit preserves that URL when editing,
+saving and reloading setup, including the credentials. The saved URL is stored
+in `ZBPC_GIT_REPO` and returned to authorized environment users; it supports up
+to 2,048 characters. The backend extracts credentials for Git, Bitbucket API and
+LFS requests without changing the saved URL. An explicit Log in overrides the
+URL credentials for that request; Log out clears the tab login, not the saved
+URL credentials. To remove those, edit the URL and Save.
 
-For GitHub repositories, use your GitHub username and a personal access token
-as the password. A fine-grained token can be restricted to the selected
-repository: grant **Contents: Read-only** for pulls or **Contents: Read and write**
-for pulls and pushes. Enter the token without a `Bearer` prefix. See
+For a Bitbucket repository access token, use `x-token-auth` as the username;
+for a Bitbucket API token, use your Atlassian account email. For GitHub, use your
+GitHub username and personal access token. Enter tokens without a `Bearer`
+prefix. Fine-grained GitHub tokens need **Contents: Read-only** for pulls or
+**Contents: Read and write** for pulls and pushes. See
 [GitHub's token setup guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
+
+The saved branch remains visible after refreshing setup, even before loading
+branches or when the branch is absent from the advertised list. You can select
+an existing branch or type a new name.
 
 SAP HTTPS configuration must support SNI and trust the Git/API hosts. Bitbucket
 History and Diff require access to `api.bitbucket.org` in addition to
@@ -112,7 +119,7 @@ Base path: `/sap/bc/zbpc_git` (handler `ZCL_BPC_GIT_HTTP`)
 Git login works as in abapGit: requests go without credentials first. When the
 Git host wants a login, the API answers 403 with `"authRequired": true` and the
 app asks for user and personal access token, keeps the token in the browser tab's `sessionStorage`,
-and retries. Only the user name persists in `localStorage`; credentials are
+and retries. Only the explicit login user name persists in `localStorage`; tab credentials are
 never stored on the server.
 
 `/diagnostics` reports credential presence, request-local source and non-secret
@@ -127,7 +134,8 @@ REST URL/auth metadata are also returned, with `restChecked=false`.
 
 Smart HTTP uses abapGit's request-local Basic login; Bitbucket REST reads use
 Bearer for `x-token-auth`, Basic for other usernames. `ZBPC_GIT_REPO` stores
-repository settings, not credentials. There is no environment-keyed secure
+repository settings, including intentionally embedded URL credentials. There is
+no environment-keyed secure
 store, SSF lookup or shared browser abapGit login in this service. The constructor
 clears the login manager before setting the supplied request credentials.
 Both Git-host 401 and 403 now produce `authRequired=true`; a 403 can also mean
