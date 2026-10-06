@@ -4,7 +4,7 @@ Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
 package links, security definitions, BPF template designs and dimension members.
 The app is a UI5 BSP application, installed with abapGit into package `ZBPC_GIT`.
-Current version: **0.17.3**. Target runtime: ABAP 7.52 and UI5 1.52.
+Current version: **0.17.4**. Target runtime: ABAP 7.52 and UI5 1.52.
 
 Choose an object type and optional model, then **Load**. Select objects to
 commit, restore or inspect their history. EPM reports and input schedules have
@@ -261,7 +261,11 @@ Manage Members permission is required. This release supports regular dimensions;
 time-dependent and reference dimensions are excluded.
 
 Restore adds/updates selected members in the **BPC working copy**, preserving
-other local members. Validate and process the dimension in BPC afterward.
+other local members. Restore then validates and processes each affected dimension
+once, including other pending member edits. If a member save fails, processing
+is skipped for that dimension. Processing failures report that the working copy
+was saved but activation was not confirmed; correct the errors in BPC and process
+the dimension. Other object types do not use this processing step.
 Properties/hierarchies must already exist with a matching schema, and referenced
 parents/members should be available first. Descriptions use the SAP session
 language. Member deletion and transaction data remain outside Git restore.

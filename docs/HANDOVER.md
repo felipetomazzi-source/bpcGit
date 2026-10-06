@@ -580,3 +580,9 @@ The overview carries memberDescription from BPC member metadata. UI displays dec
 ## Member and BPF restore path fix (0.17.3)
 
 Member/BPF restore now requests Git content by logical file path, as required by the remote interface, instead of passing a blob SHA-1. The wrong argument produced hash-is-not-in-repository errors before invoking BPC restoration. Applies to current and historical restore and configured root folders. Existing deletion branches are unchanged. Local regressions pass; live SAP restore validation remains pending.
+
+## Process restored members (0.17.4)
+
+ADT confirmed IF_UJA_MEMBER_MANAGER~PROCESS parameters and CL_UJAM_MEMBER implementation. Member restore now calls processing once per affected dimension after saves, with validation enabled and without requesting the environment offline. Failed member saves skip processing for their dimension. Processing failure changes saved-member outcomes to unsuccessful with an explicit saved-but-not-active message and clears sync records; already saved changes are not claimed rolled back. Processing covers the entire dimension including other pending member edits; UI warns accordingly. Current/historical restores share the path. Other object types unchanged. Live activation validation remains pending.
+
+Validation: ADT syntax check of the complete updated service class passed with no errors (existing ABAP Doc warnings only). Seven Node regression suites and formatter/check passed. No SAP source or member data was written; actual dimension processing is pending user abapGit activation and restore testing.

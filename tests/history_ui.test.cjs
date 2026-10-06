@@ -141,7 +141,7 @@ function fixture(response) {
   const memberList = controls.find(function (c) { return c.settings.mode === 'SingleSelectLeft'; });
   memberList.select({ getParameter: function () { return memberList.items[0]; } });
   controls.find(function (c) { return c.settings.text === 'Restore selected version'; }).settings.press();
-  assert.match(messageBox.text, /working copy/);
+  assert.match(messageBox.text, /processes the dimension/);
   messageBox.answer('OK'); await tick();
   assert.equal(f.calls[1].params.paths, f.row.path);
   assert.equal(f.calls[1].params.version, version.commit);

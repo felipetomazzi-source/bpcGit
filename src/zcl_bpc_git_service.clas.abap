@@ -187,6 +187,10 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_status TYPE string
       RETURNING VALUE(rv_committable) TYPE abap_bool.
   PRIVATE SECTION.
+    CLASS-METHODS process_dimension
+      IMPORTING iv_environment TYPE uj_appset_id iv_dimension TYPE uj_dim_name
+      RETURNING VALUE(rv_message) TYPE string.
+
     TYPES:
       BEGIN OF ty_bpc_workbook,
         path        TYPE string,
@@ -1096,6 +1100,61 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       ENDIF.
       APPEND VALUE #( path = lv_logical ok = xsdbool( lv_message IS INITIAL ) message = lv_message ) TO et_results.
     ENDLOOP.
+    " Activate only after all requested member saves have finished.
+    DATA lt_dimensions TYPE SORTED TABLE OF uj_dim_name WITH UNIQUE KEY table_line.
+    LOOP AT et_results INTO DATA(ls_result).
+      IF zcl_bpc_git_members=>get_kind( ls_result-path ) = c_kind-dimmember.
+        INSERT CONV #( zcl_bpc_git_members=>get_dimension( ls_result-path ) ) INTO TABLE lt_dimensions.
+      ENDIF.
+    ENDLOOP.
+    LOOP AT lt_dimensions INTO DATA(lv_dimension).
+      DATA(lv_processing_error) = ``.
+      LOOP AT et_results INTO ls_result WHERE ok = abap_false.
+        IF zcl_bpc_git_members=>get_dimension( ls_result-path ) = lv_dimension.
+          lv_processing_error = 'Processing skipped because another member restore failed'.
+          EXIT.
+        ENDIF.
+      ENDLOOP.
+      IF lv_processing_error IS INITIAL.
+        lv_processing_error = process_dimension(
+          iv_environment = iv_environment iv_dimension = lv_dimension ).
+      ENDIF.
+      IF lv_processing_error IS NOT INITIAL.
+        LOOP AT et_results ASSIGNING FIELD-SYMBOL(<ls_result>) WHERE ok = abap_true.
+          IF zcl_bpc_git_members=>get_dimension( <ls_result>-path ) = lv_dimension.
+            <ls_result>-ok = abap_false.
+            <ls_result>-message = |Member saved, but dimension { lv_dimension } is not confirmed active: { lv_processing_error }|.
+            DATA(lv_state_docname) = to_docname( iv_environment = iv_environment iv_path = <ls_result>-path ).
+            DELETE FROM zbpc_git_state WHERE appset = @iv_environment AND docname = @lv_state_docname.
+          ENDIF.
+        ENDLOOP.
+        COMMIT WORK.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD process_dimension.
+    TRY.
+        DATA lo_members TYPE REF TO if_uja_member_manager.
+        lo_members = NEW cl_ujam_member( i_appset_id = iv_environment i_dimension_id = iv_dimension ).
+        DATA lt_dimensions TYPE uja_t_dim_name.
+        APPEND VALUE #( dimension = iv_dimension ) TO lt_dimensions.
+        lo_members->process( EXPORTING it_dim_list = lt_dimensions if_set_offline = abap_false if_validate = abap_true
+          IMPORTING ef_success = DATA(lv_success) et_message_lines = DATA(lt_messages) ).
+        IF lv_success <> abap_true.
+          LOOP AT lt_messages INTO DATA(ls_message).
+            DATA lv_text TYPE string.
+            MESSAGE ID ls_message-msgid TYPE 'S' NUMBER ls_message-msgno
+              WITH ls_message-msgv1 ls_message-msgv2 ls_message-msgv3 ls_message-msgv4 INTO lv_text.
+            rv_message = rv_message && lv_text && ` `.
+          ENDLOOP.
+          IF rv_message IS INITIAL.
+            rv_message = 'BPC dimension processing failed'.
+          ENDIF.
+        ENDIF.
+      CATCH cx_root INTO DATA(lx_error).
+        rv_message = lx_error->get_text( ).
+    ENDTRY.
   ENDMETHOD.
 
   METHOD restore_file.
