@@ -171,6 +171,9 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_depth TYPE i DEFAULT 100
       EXPORTING ev_error TYPE string
                 et_results TYPE ty_restore_results
+                "! BPC transport entity of each restored object; path is the
+                "! result's (logical) path
+                et_entities TYPE zcl_bpc_git_transport=>ty_entities
       RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
     "! True for the statuses whose Git version may be restored: new or
     "! modified in Git, never synced but different, deleted in Git, and -
@@ -328,6 +331,11 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS xml_element
       IMPORTING iv_name TYPE string iv_value TYPE clike
       RETURNING VALUE(rv_xml) TYPE string.
+    "! BPC transport entity of a restored file, reported under iv_logical.
+    METHODS transport_entity
+      IMPORTING iv_environment TYPE uj_appset_id io_remote TYPE REF TO zcl_bpc_git_remote
+                is_file TYPE ty_workbook iv_logical TYPE string
+      RETURNING VALUE(rs_entity) TYPE zcl_bpc_git_transport=>ty_entity.
     "! Reads a package file; ev_error tells what is wrong with it.
     METHODS parse_package
       IMPORTING iv_xml TYPE xstring
@@ -930,7 +938,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD restore_files.
-    CLEAR: ev_error, et_results.
+    CLEAR: ev_error, et_results, et_entities.
     IF it_paths IS INITIAL.
       ev_error = 'Select at least one file'.
       RETURN.
@@ -1108,6 +1116,13 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       ENDTRY.
       IF lv_message IS INITIAL.
         COMMIT WORK.
+        LOOP AT ls_group-members INTO lv_member.
+          READ TABLE ls_overview-workbooks INTO ls_file WITH KEY path = lv_member.
+          IF ls_file-status <> c_status-unchanged.
+            APPEND transport_entity( iv_environment = iv_environment io_remote = io_remote
+              is_file = ls_file iv_logical = lv_logical ) TO et_entities.
+          ENDIF.
+        ENDLOOP.
       ELSE.
         " Workbook, definition, and sync records succeed or roll back together.
         ROLLBACK WORK.
@@ -1145,6 +1160,36 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         COMMIT WORK.
       ENDIF.
     ENDLOOP.
+  ENDMETHOD.
+
+  METHOD transport_entity.
+    IF is_file-status = c_status-deleted_git.
+      rs_entity = VALUE #( path = iv_logical
+        note = 'Deletions are not added to transport requests; delete the object in the target system' ).
+      RETURN.
+    ENDIF.
+    TRY.
+        IF is_file-kind = c_kind-package.
+          DATA ls_package TYPE ty_package.
+          parse_package( EXPORTING iv_xml = io_remote->get_content( is_file-path )
+                         IMPORTING es_package = ls_package ev_error = DATA(lv_error) ).
+          IF lv_error IS INITIAL.
+            rs_entity = zcl_bpc_git_transport=>package_entity( iv_path = iv_logical iv_model = is_file-model
+              iv_team = ls_package-team iv_group = ls_package-group iv_package = ls_package-id ).
+          ELSE.
+            rs_entity-note = lv_error.
+          ENDIF.
+        ELSEIF is_file-kind = c_kind-link.
+          rs_entity = zcl_bpc_git_transport=>link_entity( iv_path = iv_logical iv_model = is_file-model
+            iv_name = get_link_name( cl_abap_codepage=>convert_from( io_remote->get_content( is_file-path ) ) ) ).
+        ELSE.
+          rs_entity = zcl_bpc_git_transport=>entity_for_path( iv_environment = iv_environment
+            iv_kind = is_file-kind iv_path = is_file-path ).
+        ENDIF.
+      CATCH cx_root INTO DATA(lx_error).
+        rs_entity-note = lx_error->get_text( ).
+    ENDTRY.
+    rs_entity-path = iv_logical.
   ENDMETHOD.
 
   METHOD process_dimension.

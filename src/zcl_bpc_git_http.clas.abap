@@ -24,6 +24,8 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
         restore      TYPE string VALUE '/restore',
         history      TYPE string VALUE '/history',
         diff         TYPE string VALUE '/diff',
+        transports   TYPE string VALUE '/transports',
+        transport    TYPE string VALUE '/transport',
       END OF c_resource.
     "! Longest Git user name and access token accepted.
     CONSTANTS c_max_user TYPE i VALUE 255 ##NO_TEXT.
@@ -91,6 +93,16 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS handle_history
       IMPORTING io_service TYPE REF TO zcl_bpc_git_service
       RAISING cx_uj_static_check.
+    "! Open customizing requests in which the user may record restored objects.
+    METHODS handle_transports.
+    "! Creates a customizing request (field text) on the default layer.
+    METHODS handle_create_transport.
+    "! Records restored objects in the request; JSON member "transport".
+    METHODS transport_json
+      IMPORTING iv_environment TYPE uj_appset_id iv_request TYPE trkorr
+                it_results TYPE zcl_bpc_git_service=>ty_restore_results
+                it_entities TYPE zcl_bpc_git_transport=>ty_entities
+      RETURNING VALUE(rv_json) TYPE string.
     METHODS handle_diff IMPORTING io_service TYPE REF TO zcl_bpc_git_service RAISING cx_uj_static_check.
     METHODS read_history_depth
       RETURNING VALUE(rv_depth) TYPE i.
@@ -191,6 +203,14 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
           WHEN c_resource-restore.
             IF require_method( c_method-post ).
               handle_restore( lo_service ).
+            ENDIF.
+          WHEN c_resource-transports.
+            IF require_method( c_method-get ).
+              handle_transports( ).
+            ENDIF.
+          WHEN c_resource-transport.
+            IF require_method( c_method-post ).
+              handle_create_transport( ).
             ENDIF.
           WHEN OTHERS.
             respond_error( iv_code = 404 iv_reason = 'Not Found'
@@ -527,9 +547,14 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     DATA lv_with_login TYPE abap_bool.
     DATA lv_error TYPE string.
     DATA lt_results TYPE zcl_bpc_git_service=>ty_restore_results.
+    DATA lt_entities TYPE zcl_bpc_git_transport=>ty_entities.
+    DATA lv_request TYPE trkorr.
 
     DATA(lv_expected) = read_field( iv_name = 'commit' iv_label = 'current commit'
                                     iv_max_length = 40 iv_required = abap_false ).
+    DESCRIBE FIELD lv_request LENGTH DATA(lv_request_length) IN CHARACTER MODE.
+    lv_request = to_upper( read_field( iv_name = 'transport' iv_label = 'transport request'
+      iv_max_length = lv_request_length iv_required = abap_false ) ).
     DATA(lv_version) = to_lower( read_field( iv_name = 'version' iv_label = 'history commit'
       iv_max_length = 40 iv_required = abap_false ) ).
     DATA(lv_depth) = read_history_depth( ).
@@ -543,6 +568,14 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     DATA(lt_paths) = read_paths( ).
     IF lt_paths IS INITIAL.
       RETURN.
+    ENDIF.
+    " Refuse before changing BPC if the chosen request cannot take the objects.
+    IF lv_request IS NOT INITIAL.
+      DATA(lv_request_error) = zcl_bpc_git_transport=>check_request( lv_request ).
+      IF lv_request_error IS NOT INITIAL.
+        respond_error( iv_code = 409 iv_reason = 'Conflict' iv_message = lv_request_error ).
+        RETURN.
+      ENDIF.
     ENDIF.
 
     TRY.
@@ -559,7 +592,8 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
                                              iv_version = lv_version
                                              iv_depth = lv_depth
                                    IMPORTING ev_error = lv_error
-                                             et_results = lt_results ).
+                                             et_results = lt_results
+                                             et_entities = lt_entities ).
       CATCH zcx_abapgit_exception INTO DATA(lx_git).
         respond_git_error( ix_error = lx_git iv_with_login = lv_with_login ).
         RETURN.
@@ -578,7 +612,66 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
         `,"message":` && quote( ls_result-message ) && `}`.
       lv_separator = ','.
     ENDLOOP.
-    respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"results":[` && lv_json && `]}` ).
+    respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"results":[` && lv_json && `]` &&
+      COND string( WHEN lv_request IS NOT INITIAL THEN `,"transport":` && transport_json(
+        iv_environment = lv_environment iv_request = lv_request it_results = lt_results it_entities = lt_entities ) ) &&
+      `}` ).
+  ENDMETHOD.
+
+  METHOD transport_json.
+    " Only objects whose restore succeeded (including dimension processing).
+    DATA lt_record TYPE zcl_bpc_git_transport=>ty_entities.
+    DATA lv_skipped TYPE string.
+    DATA lv_separator TYPE string.
+    LOOP AT it_entities INTO DATA(ls_entity).
+      IF NOT line_exists( it_results[ path = ls_entity-path ok = abap_true ] ).
+        CONTINUE.
+      ENDIF.
+      IF ls_entity-entity_type IS INITIAL.
+        lv_skipped = lv_skipped && lv_separator &&
+          `{"path":` && quote( ls_entity-path ) && `,"message":` && quote( ls_entity-note ) && `}`.
+        lv_separator = ','.
+      ELSE.
+        APPEND ls_entity TO lt_record.
+      ENDIF.
+    ENDLOOP.
+    zcl_bpc_git_transport=>record( EXPORTING iv_environment = iv_environment iv_request = iv_request
+                                             it_entities = lt_record
+                                   IMPORTING ev_count = DATA(lv_count) ev_error = DATA(lv_error) ).
+    rv_json = `{"request":` && quote( iv_request ) &&
+      `,"count":` && |{ lv_count }| &&
+      `,"error":` && quote( lv_error ) &&
+      `,"skipped":[` && lv_skipped && `]}`.
+  ENDMETHOD.
+
+  METHOD handle_transports.
+    DATA lv_json TYPE string.
+    DATA lv_separator TYPE string.
+    DATA(lt_requests) = zcl_bpc_git_transport=>open_requests( ).
+    LOOP AT lt_requests INTO DATA(ls_request).
+      lv_json = lv_json && lv_separator &&
+        `{"request":` && quote( ls_request-request ) &&
+        `,"text":` && quote( ls_request-text ) &&
+        `,"owner":` && quote( ls_request-owner ) &&
+        `,"date":` && quote( |{ ls_request-date DATE = ISO }| ) && `}`.
+      lv_separator = ','.
+    ENDLOOP.
+    respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"requests":[` && lv_json && `]}` ).
+  ENDMETHOD.
+
+  METHOD handle_create_transport.
+    DATA(lv_text) = read_field( iv_name = 'text' iv_label = 'request description'
+                                iv_max_length = zcl_bpc_git_transport=>c_max_text ).
+    IF mv_invalid = abap_true.
+      RETURN.
+    ENDIF.
+    zcl_bpc_git_transport=>create_request( EXPORTING iv_text = lv_text
+                                           IMPORTING ev_request = DATA(lv_request) ev_error = DATA(lv_error) ).
+    IF lv_error IS NOT INITIAL.
+      respond_error( iv_code = 409 iv_reason = 'Conflict' iv_message = lv_error ).
+      RETURN.
+    ENDIF.
+    respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"request":` && quote( lv_request ) && `}` ).
   ENDMETHOD.
 
   METHOD read_history_depth.
