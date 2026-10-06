@@ -6,7 +6,7 @@
 
 Workspace: `C:/Users/FelipeTomazzi/projects/bpcGit`. Code repository:
 `https://github.com/felipetomazzi-source/bpcGit.git`, branch `main`.
-Application version is **0.17.9**. This code repository is distinct from the
+Application version is **0.17.10**. This code repository is distinct from the
 customer repositories holding serialized BPC content.
 
 Read `AGENTS.md`, this current handover, and `docs/SPEC.md` before implementing.
@@ -800,3 +800,16 @@ The Repository setup header has a "Change" Link (visible when configured).
 1.52 slideToggle animation via `$().children(".sapMPanelContent").promise()`
 (1.52 Panel content has no DOM id). Verified on UI5 1.52 harness: expands,
 focus lands on the branch input; OPA 7/7, embedded 22/22, Node 8/8.
+
+## Branches load on dropdown open (0.17.10, 2026-10-06)
+
+`onInit` attaches `onBranchListOpen` to the branch ComboBox picker's
+beforeOpen (via protected `getPicker()`, guarded; `loadItems` cannot be used
+because it fires only for an empty list and the saved branch is always
+listed). It calls `_testConnection` only when configured, `/connection` is
+null (not loaded yet; reset by URL/environment change and `_showConfig`), no
+request is running and the URL equals the saved URL. A login dialog may
+appear for private repositories without URL credentials, as with Load
+branches. Verified on UI5 1.52 harness with a stubbed connection response:
+one request on first open, list updates while open, no refetch on reopen,
+none for an unsaved URL. Node 8/8, OPA 7/7, embedded 22/22.

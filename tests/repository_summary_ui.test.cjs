@@ -40,3 +40,22 @@ console.log('repository summary: ok');
   assert.equal(calls[2], 'focus');
   assert.ok(view.includes('press=".onChangeRepository"'));
 }
+
+// Opening the branch dropdown loads branches only when they are not loaded yet.
+{
+  const base = { configured: true, connection: null, connectionBusy: false,
+    config: { url: 'https://h/r.git' }, savedRepositoryUrl: 'https://h/r.git' };
+  const run = state => {
+    let loads = 0;
+    methods.onBranchListOpen.call({
+      _model: { getProperty: p => p.slice(1).split('/').reduce((o, k) => o && o[k], state) },
+      _testConnection: () => { loads++; }
+    });
+    return loads;
+  };
+  assert.equal(run(base), 1);
+  assert.equal(run(Object.assign({}, base, { connection: { branches: [] } })), 0, 'already loaded');
+  assert.equal(run(Object.assign({}, base, { connectionBusy: true })), 0, 'request running');
+  assert.equal(run(Object.assign({}, base, { configured: false })), 0, 'not set up');
+  assert.equal(run(Object.assign({}, base, { config: { url: 'https://h/other.git' } })), 0, 'unsaved URL');
+}

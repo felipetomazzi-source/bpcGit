@@ -4,7 +4,7 @@ Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
 package links, security definitions, BPF template designs and dimension members.
 The app is a UI5 BSP application, installed with abapGit into package `ZBPC_GIT`.
-Current version: **0.17.9**. Target runtime: ABAP 7.52 and UI5 1.52.
+Current version: **0.17.10**. Target runtime: ABAP 7.52 and UI5 1.52.
 
 Choose an object type and optional model, then **Load**. Select objects to
 commit, restore or inspect their history. EPM reports and input schedules have
@@ -26,8 +26,10 @@ After pulling with abapGit, the app runs at
 Use this UI5 path, not `/sap/bc/bsp/sap/...`: the BSP runtime rejects host
 names without a domain (`CX_FQDN`), such as `vhcalnplci`.
 
-## Latest updates (0.17.9)
+## Latest updates (0.17.10)
 
+- Opening the Branch dropdown loads the repository's branches automatically
+  (once per saved repository URL). **Load branches** remains as a refresh.
 - A **Change** link in the Repository setup header expands the setup and
   puts the cursor in the Branch field.
 - Repository setup now sits at the top of the page. Its header shows the
