@@ -576,3 +576,7 @@ Form field presence detection is case-insensitive to handle SAP HTTP field-name 
 ## Dimension member labels (0.17.2)
 
 The overview carries memberDescription from BPC member metadata. UI displays decoded ID without .xml, followed by the description when available. Git-only members fall back to ID; no extra Git downloads are added. Git paths and serialized XML are unchanged. SAP backend compilation remains pending.
+
+## Member and BPF restore path fix (0.17.3)
+
+Member/BPF restore now requests Git content by logical file path, as required by the remote interface, instead of passing a blob SHA-1. The wrong argument produced hash-is-not-in-repository errors before invoking BPC restoration. Applies to current and historical restore and configured root folders. Existing deletion branches are unchanged. Local regressions pass; live SAP restore validation remains pending.

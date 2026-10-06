@@ -1105,7 +1105,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     IF is_file-kind = c_kind-dimmember.
       DATA(lv_member_delete) = xsdbool( is_file-status = c_status-deleted_git ).
       DATA(lv_member_xml) = COND xstring( WHEN lv_member_delete = abap_true THEN is_file-content
-        ELSE io_remote->get_content( is_file-git_sha1 ) ).
+        ELSE io_remote->get_content( is_file-path ) ).
       rv_message = zcl_bpc_git_members=>restore( iv_environment = iv_environment iv_path = is_file-path
         iv_xml = lv_member_xml iv_delete = lv_member_delete ).
       RETURN.
@@ -1113,7 +1113,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     IF is_file-kind = c_kind-bpf.
       DATA(lv_bpf_delete) = xsdbool( is_file-status = c_status-deleted_git ).
       DATA(lv_bpf_xml) = COND xstring( WHEN lv_bpf_delete = abap_true THEN is_file-content
-        ELSE io_remote->get_content( is_file-git_sha1 ) ).
+        ELSE io_remote->get_content( is_file-path ) ).
       rv_message = zcl_bpc_git_bpf=>restore( iv_environment = iv_environment iv_path = is_file-path
         iv_xml = lv_bpf_xml iv_delete = lv_bpf_delete ).
       RETURN.
