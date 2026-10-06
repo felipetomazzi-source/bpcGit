@@ -39,6 +39,12 @@ credentials from the saved URL. Prefer a clean URL such as
 access token, use `x-token-auth` as the username; for a Bitbucket API token, use
 your Atlassian account email. Tokens need the relevant repository/API permissions.
 
+For GitHub repositories, use your GitHub username and a personal access token
+as the password. A fine-grained token can be restricted to the selected
+repository: grant **Contents: Read-only** for pulls or **Contents: Read and write**
+for pulls and pushes. Enter the token without a `Bearer` prefix. See
+[GitHub's token setup guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
+
 SAP HTTPS configuration must support SNI and trust the Git/API hosts. Bitbucket
 History and Diff require access to `api.bitbucket.org` in addition to
 `bitbucket.org`. Connection failures display SAP's HTTP/TLS diagnostic details.
