@@ -6,7 +6,7 @@
 
 Workspace: `C:/Users/FelipeTomazzi/projects/bpcGit`. Code repository:
 `https://github.com/felipetomazzi-source/bpcGit.git`, branch `main`.
-Application version is **0.17.10**. This code repository is distinct from the
+Application version is **0.18.0**. This code repository is distinct from the
 customer repositories holding serialized BPC content.
 
 Read `AGENTS.md`, this current handover, and `docs/SPEC.md` before implementing.
@@ -813,3 +813,38 @@ appear for private repositories without URL credentials, as with Load
 branches. Verified on UI5 1.52 harness with a stubbed connection response:
 one request on first open, list updates while open, no refetch on reopen,
 none for an unsaved URL. Node 8/8, OPA 7/7, embedded 22/22.
+
+## Customizing transports for restores (0.18.0, 2026-10-06)
+
+User request: record restored objects in a transport request, customizing type
+("that's how BPC handles it"), default transport layer. Researched via ADT:
+CL_UJT_TRANS_MGR=>CREATE_REQUEST creates type W with task Q; objects are
+R3TR <tlogo> <GUID> appended with TR_APPEND_TO_COMM; GUIDs map entities in
+UJT_GUID (RSTLOGO ABPC); UJT_ENTITY_CLASS-F_GENERIC_TLOGO = X means object
+ABPC, otherwise the entity type is the object type. CL_UJT_TLOGO_ABPC exports
+at release; UJT_TLOGO_AFTER_IMPORT imports.
+
+ZCL_BPC_GIT_TRANSPORT: open_requests (W, status D, this client, user has an
+open task), create_request (TR_INSERT_REQUEST_WITH_TASKS, no target = default
+layer), check_request, entity mapping, record (reuses UJT_GUID mapping or
+generates via CL_UJT_UTILITY=>GENERATE_GUID and inserts it; skips entries
+already in the request/tasks; all-or-nothing with rollback). Entity formats,
+confirmed against CH_PLANNING UJT_GUID rows:
+- EPM workbook AFLE, model, COMPANY\EEXCEL\... or <team>\EEXCEL\...
+- Transformation/conversion ADMF, model, COMPANY\DATAMANAGER\<folder>\<name>
+  without extension (definition and workbook are one entity)
+- Logic scripts ASPR, model, ADMINAPP\<model> (whole model folder)
+- Package ADMP via CL_UJD_ENTITY_ADMP=>CONCAT_ENTITY_ID(team, group, id)
+- Package link ADML, model, link name; Members AMBR, dimension
+- BPF ABPF, UJB_TMPL_HDR-TMPL_GUID by TECH_NAME; Team ATEM, task profile
+  ATPF, data access profile ADAF by ID
+Deletions are reported as not transported (BPC uses UJT_TRANS_DEL for those).
+
+HTTP: GET /transports, POST /transport (text), restore field transport
+(checked before restore; response member transport {request,count,error,
+skipped}). Only objects whose restore result is ok are recorded. UI: picker in
+bulk and history restore dialogs; UI5 1.52 Select needs a non-empty key for
+"no request" (__NONE__). Unit tests (4) pass in SAP; Node 9/9; OPA 7/7;
+embedded 22/22. NOT yet verified live: creating a request, recording entries,
+and releasing/importing one. Test with a throwaway request first and check
+E071 entries (and UJT_GUID rows for new GUIDs) before releasing.

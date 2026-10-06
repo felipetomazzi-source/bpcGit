@@ -26,6 +26,13 @@ Control.prototype.open = function () { this.opened = true; };
 Control.prototype.close = function () { if (this.settings.afterClose) { this.settings.afterClose(); } };
 Control.prototype.destroy = function () { this.destroyed = true; };
 Control.prototype.addStyleClass = function () { return this; };
+Control.prototype.attachChange = function (callback) { this.change = callback; };
+Control.prototype.setSelectedKey = function (key) { this.selectedKey = key; return this; };
+Control.prototype.getSelectedKey = function () { return this.selectedKey; };
+Control.prototype.insertItem = function (item, index) { this.items.splice(index, 0, item); return this; };
+Control.prototype.getValue = function () { return this.value || ''; };
+Control.prototype.setValueState = function (state) { this.valueState = state; return this; };
+Control.prototype.setValueStateText = function () { return this; };
 const messageBox = {
   Action: { OK: 'OK', CANCEL: 'CANCEL' },
   confirm: function (text, options) { this.text = text; this.answer = options.onClose; }
@@ -57,6 +64,7 @@ function fixture(response) {
       calls.push({ resource: resource, params: params });
       return Promise.resolve(resource === 'history' ? response : { results: [{ ok: true }] });
     },
+    _request: function () { return Promise.resolve({ requests: [] }); },
     _loadWorkbooks: function () { this.reloaded = true; }
   });
   return { instance: instance, row: row, calls: calls, values: values };
@@ -143,9 +151,11 @@ function fixture(response) {
   controls.find(function (c) { return c.settings.text === 'Restore selected version'; }).settings.press();
   assert.match(messageBox.text, /processes the dimension/);
   messageBox.answer('OK'); await tick();
-  assert.equal(f.calls[1].params.paths, f.row.path);
-  assert.equal(f.calls[1].params.version, version.commit);
-  assert.equal(f.calls[1].params.commit, 'b'.repeat(40));
+  const restoreCall = f.calls.find(function (c) { return c.resource === 'restore'; });
+  assert.equal(restoreCall.params.paths, f.row.path);
+  assert.equal(restoreCall.params.version, version.commit);
+  assert.equal(restoreCall.params.commit, 'b'.repeat(40));
+  assert.equal(restoreCall.params.transport, '', 'no transport request unless one is chosen');
   f = fixture({ head: 'b'.repeat(40), truncated: false, versions: [Object.assign({}, version, { present: false })] });
   f.row.path = 'DIMENSIONS/ACCOUNT/MEMBERS/NET%20SALES.xml'; f.row.kind = 'DIMMEMBER';
   f.instance.onHistory(); await tick();
@@ -154,6 +164,7 @@ function fixture(response) {
   const memberDeletedRestore = controls.find(function (c) { return c.settings.text === 'Restore selected version'; });
   assert.equal(memberDeletedRestore.enabled, false);
   memberDeletedRestore.settings.press();
-  assert.equal(f.calls.length, 1, 'historical deletion cannot delete a dimension member');
+  assert.equal(f.calls.filter(function (c) { return c.resource === 'restore'; }).length, 0,
+    'historical deletion cannot delete a dimension member');
   console.log('History UI regression checks passed');
 })().catch(function (error) { console.error(error); process.exitCode = 1; });
