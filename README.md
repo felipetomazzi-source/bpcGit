@@ -4,7 +4,7 @@ Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
 package links, security definitions, BPF template designs and dimension members.
 The app is a UI5 BSP application, installed with abapGit into package `ZBPC_GIT`.
-Current version: **0.18.0**. Target runtime: ABAP 7.52 and UI5 1.52.
+Current version: **0.18.1**. Target runtime: ABAP 7.52 and UI5 1.52.
 
 Choose an object type and optional model, then **Load**. Select objects to
 commit, restore or inspect their history. EPM reports and input schedules have
@@ -26,8 +26,11 @@ After pulling with abapGit, the app runs at
 Use this UI5 path, not `/sap/bc/bsp/sap/...`: the BSP runtime rejects host
 names without a domain (`CX_FQDN`), such as `vhcalnplci`.
 
-## Latest updates (0.18.0)
+## Latest updates (0.18.1)
 
+- **Add to transport** adds the selected objects, as they are in BPC now, to a
+  customizing transport request without restoring anything. The dialog
+  preselects your last or newest open request, or creates a new one.
 - Restores can record the restored objects in a **customizing transport
   request**. Both restore dialogs have a "Transport request" field: no request
   (default), one of your open customizing requests in this client, or a new

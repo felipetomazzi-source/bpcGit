@@ -1003,3 +1003,10 @@ Logic scripts are recorded per model and dimension members per dimension.
 Deleted objects are not recorded. Recording failures do not undo the restore;
 the response member `transport` reports the request, the number of entries,
 an error, and skipped objects.
+
+## Add objects to a transport without restoring (0.18.1)
+
+`POST /transport/record` with `environment`, `transport` and `paths` records
+the BPC objects of the selected paths, as they are in BPC now, in the request
+under the same rules as restores. Objects that are not in BPC are reported as
+skipped. Nothing in BPC or Git changes.

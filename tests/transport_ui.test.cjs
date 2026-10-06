@@ -17,9 +17,17 @@ Control.prototype.getValue = function () { return this.value || ''; };
 Control.prototype.setValueState = function (state) { this.valueState = state; return this; };
 Control.prototype.setValueStateText = function () { return this; };
 Control.prototype.addStyleClass = function () { return this; };
+Control.prototype.addItem = function (item) { this.items.push(item); return this; };
+Control.prototype.setBusy = function (value) { this.busy = value; return this; };
+Control.prototype.open = function () { this.opened = true; };
+Control.prototype.close = function () { this.closed = true; };
+const toasts = [];
+const warnings = [];
 vm.runInNewContext(fs.readFileSync('src/zbpc_git.wapa.controller_-app.controller.js', 'utf8'), {
   sap: { ui: { define: (names, factory) => factory.apply(null, names.map(name =>
-    name.endsWith('/Controller') ? { extend: (name, m) => { methods = m; } } : Control)) } },
+    name.endsWith('/Controller') ? { extend: (name, m) => { methods = m; } } :
+    name.endsWith('/MessageToast') ? { show: text => toasts.push(text) } :
+    name.endsWith('/MessageBox') ? { warning: text => warnings.push(text) } : Control)) } },
   jQuery: { trim: s => s.trim() },
   Promise: Promise
 });
@@ -71,5 +79,42 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     'Recorded 2 objects in transport request R1');
   assert.equal(methods._transportOutcome({ request: 'R1', count: 0, error: 'Released', skipped: [{ path: 'P', message: 'M' }] }),
     'Not recorded in transport request R1: Released\nNot in transport: P: M');
+  // Adding objects without a restore: a request is required, the first open one is preselected.
+  const required = Object.assign({}, methods, {
+    _request: () => Promise.resolve({ requests: [{ request: 'NPLK900200', text: 'BPC fixes' }] })
+  })._createTransportPicker(true);
+  await tick();
+  const requiredSelect = required.control.settings.items[1];
+  assert.deepEqual(Array.from(requiredSelect.items, item => item.settings.key), ['NPLK900200', '__NEW__']);
+  assert.equal(await required.resolve(), 'NPLK900200');
+
+  const rows = [{ path: 'M/EEXCEL/R.XLSX', name: 'R.XLSX', model: 'M', folder: 'EEXCEL', inBpc: true, selected: true },
+    { path: 'M/EEXCEL/OTHER.XLSX', name: 'OTHER.XLSX', inBpc: true, selected: false }];
+  const requests = [];
+  let dialog;
+  const add = Object.assign({}, methods, {
+    _model: { getProperty: key => ({ '/workbooks': rows, '/environment': 'ENV' })[key] },
+    getView: () => ({ addDependent: control => { dialog = control; } }),
+    _request: function (resource, params, method) {
+      requests.push({ resource, params, method });
+      return Promise.resolve(resource === 'transports' ? { requests: [{ request: 'NPLK900200', text: '' }] }
+        : { transport: { request: params.transport, count: 1, error: '', skipped: [] } });
+    }
+  });
+  add.onAddToTransport();
+  await tick();
+  assert.equal(dialog.opened, true);
+  dialog.settings.beginButton.settings.press();
+  await tick(); await tick();
+  const record = requests.find(call => call.resource === 'transport/record');
+  assert.equal(JSON.stringify(record), JSON.stringify({ resource: 'transport/record',
+    params: { environment: 'ENV', transport: 'NPLK900200', paths: 'M/EEXCEL/R.XLSX' }, method: 'POST' }));
+  assert.equal(dialog.closed, true);
+  assert.equal(toasts.pop(), 'Recorded 1 object in transport request NPLK900200');
+
+  // Objects that are not in BPC cannot be added.
+  rows[0].inBpc = false; dialog = undefined;
+  add.onAddToTransport();
+  assert.equal(dialog, undefined);
   console.log('transport UI: ok');
 })().catch(error => { console.error(error); process.exitCode = 1; });

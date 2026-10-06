@@ -6,7 +6,7 @@
 
 Workspace: `C:/Users/FelipeTomazzi/projects/bpcGit`. Code repository:
 `https://github.com/felipetomazzi-source/bpcGit.git`, branch `main`.
-Application version is **0.18.0**. This code repository is distinct from the
+Application version is **0.18.1**. This code repository is distinct from the
 customer repositories holding serialized BPC content.
 
 Read `AGENTS.md`, this current handover, and `docs/SPEC.md` before implementing.
@@ -848,3 +848,15 @@ bulk and history restore dialogs; UI5 1.52 Select needs a non-empty key for
 embedded 22/22. NOT yet verified live: creating a request, recording entries,
 and releasing/importing one. Test with a throwaway request first and check
 E071 entries (and UJT_GUID rows for new GUIDs) before releasing.
+
+## Add to transport without restoring (0.18.1, 2026-10-07)
+
+Toolbar button "Add to transport (n)" for selected rows that exist in BPC.
+POST /transport/record (environment, transport, paths) checks the request,
+maps paths with ZCL_BPC_GIT_SERVICE=>TRANSPORT_ENTITIES from BPC only (no Git
+access): file kinds require the UJF_DOC document; packages/links take their
+identity from BPC's own definitions (list_packages/list_links); others use
+entity_for_path. Recording reuses ZCL_BPC_GIT_TRANSPORT=>RECORD; response
+member transport as for restores. Picker has a required mode (no "No
+transport" option; last or first open request preselected). Node 9/9 incl.
+new add-to-transport checks; harness dialog renders. Live SAP test pending.

@@ -26,6 +26,7 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
         diff         TYPE string VALUE '/diff',
         transports   TYPE string VALUE '/transports',
         transport    TYPE string VALUE '/transport',
+        record       TYPE string VALUE '/transport/record',
       END OF c_resource.
     "! Longest Git user name and access token accepted.
     CONSTANTS c_max_user TYPE i VALUE 255 ##NO_TEXT.
@@ -97,6 +98,11 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS handle_transports.
     "! Creates a customizing request (field text) on the default layer.
     METHODS handle_create_transport.
+    "! Adds the BPC objects of the selected paths, as they are now, to the
+    "! request. Fields: environment, transport, paths.
+    METHODS handle_record_transport
+      IMPORTING io_service TYPE REF TO zcl_bpc_git_service
+      RAISING cx_uj_static_check.
     "! Records restored objects in the request; JSON member "transport".
     METHODS transport_json
       IMPORTING iv_environment TYPE uj_appset_id iv_request TYPE trkorr
@@ -211,6 +217,10 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
           WHEN c_resource-transport.
             IF require_method( c_method-post ).
               handle_create_transport( ).
+            ENDIF.
+          WHEN c_resource-record.
+            IF require_method( c_method-post ).
+              handle_record_transport( lo_service ).
             ENDIF.
           WHEN OTHERS.
             respond_error( iv_code = 404 iv_reason = 'Not Found'
@@ -642,6 +652,36 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       `,"count":` && |{ lv_count }| &&
       `,"error":` && quote( lv_error ) &&
       `,"skipped":[` && lv_skipped && `]}`.
+  ENDMETHOD.
+
+  METHOD handle_record_transport.
+    DATA lv_environment TYPE uj_appset_id.
+    DATA lv_request TYPE trkorr.
+    DESCRIBE FIELD lv_environment LENGTH DATA(lv_environment_length) IN CHARACTER MODE.
+    DESCRIBE FIELD lv_request LENGTH DATA(lv_request_length) IN CHARACTER MODE.
+    lv_environment = read_field( iv_name = 'environment' iv_label = 'environment'
+                                 iv_max_length = lv_environment_length ).
+    lv_request = to_upper( read_field( iv_name = 'transport' iv_label = 'transport request'
+                                       iv_max_length = lv_request_length ) ).
+    IF mv_invalid = abap_true.
+      RETURN.
+    ENDIF.
+    DATA(lt_paths) = read_paths( ).
+    IF lt_paths IS INITIAL.
+      RETURN.
+    ENDIF.
+    DATA(lv_error) = zcl_bpc_git_transport=>check_request( lv_request ).
+    IF lv_error IS NOT INITIAL.
+      respond_error( iv_code = 409 iv_reason = 'Conflict' iv_message = lv_error ).
+      RETURN.
+    ENDIF.
+    DATA(lt_entities) = io_service->transport_entities( iv_environment = lv_environment it_paths = lt_paths ).
+    DATA lt_results TYPE zcl_bpc_git_service=>ty_restore_results.
+    LOOP AT lt_paths INTO DATA(lv_path).
+      APPEND VALUE #( path = lv_path ok = abap_true ) TO lt_results.
+    ENDLOOP.
+    respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"transport":` && transport_json(
+      iv_environment = lv_environment iv_request = lv_request it_results = lt_results it_entities = lt_entities ) && `}` ).
   ENDMETHOD.
 
   METHOD handle_transports.

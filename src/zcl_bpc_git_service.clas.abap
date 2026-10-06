@@ -175,6 +175,13 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 "! result's (logical) path
                 et_entities TYPE zcl_bpc_git_transport=>ty_entities
       RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
+    "! BPC transport entities of objects as they are in BPC now, for adding
+    "! them to a transport request without restoring. Objects not in BPC are
+    "! returned with a note instead of an entity type.
+    METHODS transport_entities
+      IMPORTING iv_environment TYPE uj_appset_id it_paths TYPE string_table
+      RETURNING VALUE(rt_entities) TYPE zcl_bpc_git_transport=>ty_entities
+      RAISING cx_uj_no_auth cx_uj_static_check.
     "! True for the statuses whose Git version may be restored: new or
     "! modified in Git, never synced but different, deleted in Git, and -
     "! discarding the BPC side, which the app warns about - modified or
@@ -1159,6 +1166,59 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         ENDLOOP.
         COMMIT WORK.
       ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD transport_entities.
+    check_environment( iv_environment ).
+    DATA lt_definitions TYPE ty_bpc_workbooks.
+    DATA lt_listed TYPE SORTED TABLE OF string WITH UNIQUE KEY table_line.
+    LOOP AT it_paths INTO DATA(lv_path).
+      DATA(lv_kind) = get_kind( lv_path ).
+      DATA(ls_entity) = VALUE zcl_bpc_git_transport=>ty_entity( path = lv_path ).
+      CASE lv_kind.
+        WHEN c_kind-package OR c_kind-link.
+          " Identity from BPC's own definition; Git paths hold sanitized names.
+          DATA(lv_model) = get_model( lv_path ).
+          IF NOT line_exists( lt_listed[ table_line = lv_model ] ).
+            INSERT lv_model INTO TABLE lt_listed.
+            list_packages( EXPORTING iv_environment = iv_environment iv_model = CONV #( lv_model )
+                           CHANGING ct_workbooks = lt_definitions ).
+            list_links( EXPORTING iv_environment = iv_environment iv_model = CONV #( lv_model )
+                        CHANGING ct_workbooks = lt_definitions ).
+          ENDIF.
+          READ TABLE lt_definitions INTO DATA(ls_definition) WITH KEY path = lv_path.
+          IF sy-subrc <> 0.
+            ls_entity-note = 'Not in BPC'.
+          ELSEIF lv_kind = c_kind-package.
+            DATA ls_package TYPE ty_package.
+            CLEAR ls_package.
+            parse_package( EXPORTING iv_xml = ls_definition-content
+                           IMPORTING es_package = ls_package ev_error = DATA(lv_error) ).
+            ls_entity = COND #( WHEN lv_error IS INITIAL
+              THEN zcl_bpc_git_transport=>package_entity( iv_path = lv_path iv_model = lv_model
+                iv_team = ls_package-team iv_group = ls_package-group iv_package = ls_package-id )
+              ELSE VALUE #( path = lv_path note = lv_error ) ).
+          ELSE.
+            ls_entity = zcl_bpc_git_transport=>link_entity( iv_path = lv_path iv_model = lv_model
+              iv_name = get_link_name( cl_abap_codepage=>convert_from( ls_definition-content ) ) ).
+          ENDIF.
+        WHEN c_kind-workbook OR c_kind-transformation OR c_kind-conversion OR c_kind-script.
+          DATA(lv_docname) = to_docname( iv_environment = iv_environment iv_path = lv_path ).
+          SELECT SINGLE docname FROM ujf_doc
+            WHERE appset = @iv_environment AND docname = @lv_docname
+            INTO @DATA(lv_found).
+          IF sy-subrc = 0.
+            ls_entity = zcl_bpc_git_transport=>entity_for_path( iv_environment = iv_environment
+              iv_kind = lv_kind iv_path = lv_path ).
+          ELSE.
+            ls_entity-note = 'Not in BPC'.
+          ENDIF.
+        WHEN OTHERS.
+          ls_entity = zcl_bpc_git_transport=>entity_for_path( iv_environment = iv_environment
+            iv_kind = lv_kind iv_path = lv_path ).
+      ENDCASE.
+      APPEND ls_entity TO rt_entities.
     ENDLOOP.
   ENDMETHOD.
 
