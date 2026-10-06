@@ -32,7 +32,7 @@ sap.ui.getCore().attachInit(function () {
         Then.waitFor({ id: 'workbookTable', check: function (table) { return table.getItems().length === 1 && !table.getBusy(); },
           success: function (table) {
             Opa5.assert.strictEqual(table.getModel('app').getProperty('/loadedScope/dimension'), 'ACCOUNT', 'Selected dimension reaches the load');
-            Opa5.assert.ok(table.getDomRef().textContent.indexOf('CASH TOTAL.xml') !== -1, 'Rendered member name uses a space');
+            Opa5.assert.ok(table.getDomRef().textContent.indexOf('CASH TOTAL - Cash total') !== -1, 'Rendered member name uses a space');
           }});
         Then.iTeardownMyUIComponent();
       });

@@ -156,7 +156,11 @@ const response = { branch: 'main', branchFound: true, commit: 'a'.repeat(40),
   f.pending[3].resolve(response); await tick();
   const memberPath = 'DIMENSIONS/ACCOUNT/MEMBERS/NET%20SALES.xml';
   const memberRow = methods._toRow({ path: memberPath, kind: 'DIMMEMBER', model: '', status: 'MODIFIED_BPC' });
-  assert.equal(memberRow.name, 'NET SALES.xml');
+  assert.equal(memberRow.name, 'NET SALES');
+  const described = methods._toRow({ path: memberPath, kind: 'DIMMEMBER', status: 'MODIFIED_BPC', memberDescription: ' Net sales & revenue ' });
+  assert.equal(described.name, 'NET SALES - Net sales & revenue');
+  assert.equal(described.path, memberPath, 'Display labels do not change Git identity');
+  assert.equal(methods._toRow({ path: memberPath, kind: 'DIMMEMBER', status: 'NEW_GIT' }).name, 'NET SALES');
   assert.equal(memberRow.path, memberPath);
   assert.equal(memberRow.location, 'DIMENSIONS');
   assert.equal(memberRow.locationText, 'Dimension ACCOUNT');

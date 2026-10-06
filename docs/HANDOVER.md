@@ -572,3 +572,7 @@ Validation: seven Node suites and the UI5 1.52 embedded browser journey pass; th
 ## Root folder Save fix (0.17.1)
 
 Form field presence detection is case-insensitive to handle SAP HTTP field-name normalization. Explicit blank rootFolder still clears the setting, while an omitted field preserves the saved setting. ABAP Unit covers uppercase, camel case, mixed case empty and omitted fields. SAP execution remains pending.
+
+## Dimension member labels (0.17.2)
+
+The overview carries memberDescription from BPC member metadata. UI displays decoded ID without .xml, followed by the description when available. Git-only members fall back to ID; no extra Git downloads are added. Git paths and serialized XML are unchanged. SAP backend compilation remains pending.

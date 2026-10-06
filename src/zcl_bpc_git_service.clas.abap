@@ -32,6 +32,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         "! Definitions are generated XML rather than BPC file-service documents
         generated   TYPE abap_bool,
         content     TYPE xstring,
+        member_description TYPE string,
         members     TYPE string_table,
       END OF ty_workbook,
       ty_workbooks TYPE STANDARD TABLE OF ty_workbook WITH DEFAULT KEY.
@@ -199,6 +200,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         "! Definitions are generated XML rather than BPC file-service documents
         generated   TYPE abap_bool,
         content     TYPE xstring,
+        member_description TYPE string,
       END OF ty_bpc_workbook,
       ty_bpc_workbooks TYPE SORTED TABLE OF ty_bpc_workbook WITH UNIQUE KEY path.
     TYPES ty_states TYPE SORTED TABLE OF zbpc_git_state WITH UNIQUE KEY docname.
@@ -553,7 +555,8 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         lstmod_date = ls_bpc-lstmod_date
         lstmod_time = ls_bpc-lstmod_time
         generated   = ls_bpc-generated
-        content     = ls_bpc-content ).
+        content     = ls_bpc-content
+        member_description = ls_bpc-member_description ).
       CLEAR ls_state.
       READ TABLE lt_states INTO ls_state WITH TABLE KEY docname = ls_bpc-docname.
       lv_synced = boolc( sy-subrc = 0 ).
@@ -1292,7 +1295,8 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         LOOP AT lt_members INTO DATA(ls_member).
           INSERT VALUE #( path = ls_member-path kind = c_kind-dimmember
             docname = to_docname( iv_environment = iv_environment iv_path = ls_member-path )
-            generated = abap_true content = ls_member-content size = xstrlen( ls_member-content ) ) INTO TABLE rt_workbooks.
+            generated = abap_true content = ls_member-content member_description = ls_member-description
+            size = xstrlen( ls_member-content ) ) INTO TABLE rt_workbooks.
         ENDLOOP.
       ELSEIF iv_kind = c_kind-dimmember.
         RAISE EXCEPTION TYPE cx_uj_no_auth.

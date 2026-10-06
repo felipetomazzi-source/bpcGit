@@ -22,6 +22,7 @@ CLASS zcl_bpc_git_members DEFINITION PUBLIC FINAL CREATE PUBLIC.
       ty_definitions TYPE STANDARD TABLE OF ty_definition WITH DEFAULT KEY,
       BEGIN OF ty_file,
         path TYPE string,
+        description TYPE string,
         content TYPE xstring,
       END OF ty_file,
       ty_files TYPE SORTED TABLE OF ty_file WITH UNIQUE KEY path.
@@ -209,7 +210,7 @@ CLASS zcl_bpc_git_members IMPLEMENTATION.
         IF ls_definition-id IS INITIAL OR line_exists( rt_files[ path = lv_path ] ).
           zcx_abapgit_exception=>raise( 'Empty or duplicate BPC member IDs cannot share a Git path' ).
         ENDIF.
-        INSERT VALUE #( path = lv_path content = encode( ls_definition ) ) INTO TABLE rt_files.
+        INSERT VALUE #( path = lv_path description = ls_definition-description content = encode( ls_definition ) ) INTO TABLE rt_files.
       ENDLOOP.
     ENDLOOP.
   ENDMETHOD.

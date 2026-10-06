@@ -450,6 +450,7 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       lv_json = lv_json && lv_separator &&
         `{"path":` && quote( ls_workbook-path ) &&
         `,"kind":` && quote( ls_workbook-kind ) &&
+        `,"memberDescription":` && quote( ls_workbook-member_description ) &&
         `,"model":` && quote( ls_workbook-model ) &&
         `,"team":` && quote( ls_workbook-team ) &&
         `,"status":` && quote( ls_workbook-status ) &&
