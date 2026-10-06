@@ -617,3 +617,12 @@ write is performed by this correction. Pull the corrected table definition and
 activate it; the previous failed activation is not evidence of deleted data.
 Formatter and local XML length consistency checks pass. SAP activation remains
 for the user to confirm after pulling the correction.
+
+## URL serializer alignment (2026-10-06)
+
+User's abapGit diff showed SAP's canonical built-in CHAR field serialization:
+ADMINFIELD precedes INTTYPE, MASK contains two spaces followed by CHAR, and
+COMPTYPE is absent. Aligned only the URL DD03P XML with that observed output.
+Field type and length stay CHAR1024; this corrects a persistent serialization
+diff rather than changing the table layout. Formatter and XML assertions pass.
+Confirmation that refresh clears the diff remains with the user in SAP.
