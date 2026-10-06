@@ -31,7 +31,7 @@ direct HTTP client path and must not be conflated with smart-HTTP preflight.
 
 Setup preserves intentionally supplied HTTPS `user:token@host` URLs on field
 change, Save and reload. This supersedes 0.15.3's URL stripping and tab-login
-import. ZBPC_GIT_REPO URL is CHAR2048; the configuration endpoint uses the DDIC
+import. ZBPC_GIT_REPO URL is CHAR1024 (corrected in 0.17.6); the configuration endpoint uses the DDIC
 length to reject overlong input before assigning it. Authorized environment
 users receive the stored URL including credentials in configuration responses.
 

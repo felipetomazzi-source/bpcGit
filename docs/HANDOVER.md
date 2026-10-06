@@ -606,3 +606,14 @@ precedence and empty-token rejection. ADT source read and syntax check both
 returned HTTP 400, so SAP syntax/ABAP Unit execution and activation remain
 unverified. Pull/activate the DDIC URL expansion, remote class, dependent HTTP/
 service classes and BSP together before testing URL Save/reload in SAP.
+
+## URL DDIC activation correction (0.17.6, 2026-10-06)
+
+SAP rejected the 0.17.5 CHAR2048 URL field: the installed database/DDIC allows
+at most 1,333 characters. URL is now CHAR1024 (2,048 internal Unicode bytes).
+The configuration endpoint derives its input limit from DDIC, so overlong
+addresses are rejected before assignment. No data migration or configuration
+write is performed by this correction. Pull the corrected table definition and
+activate it; the previous failed activation is not evidence of deleted data.
+Formatter and local XML length consistency checks pass. SAP activation remains
+for the user to confirm after pulling the correction.

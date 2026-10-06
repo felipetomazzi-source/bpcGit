@@ -4,7 +4,7 @@ Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
 package links, security definitions, BPF template designs and dimension members.
 The app is a UI5 BSP application, installed with abapGit into package `ZBPC_GIT`.
-Current version: **0.17.5**. Target runtime: ABAP 7.52 and UI5 1.52.
+Current version: **0.17.6**. Target runtime: ABAP 7.52 and UI5 1.52.
 
 Choose an object type and optional model, then **Load**. Select objects to
 commit, restore or inspect their history. EPM reports and input schedules have
@@ -36,7 +36,7 @@ Use **Log in** for request-local Git credentials, or intentionally include
 `user:token@host` in the repository URL. bpcGit preserves that URL when editing,
 saving and reloading setup, including the credentials. The saved URL is stored
 in `ZBPC_GIT_REPO` and returned to authorized environment users; it supports up
-to 2,048 characters. The backend extracts credentials for Git, Bitbucket API and
+to 1,024 characters. The backend extracts credentials for Git, Bitbucket API and
 LFS requests without changing the saved URL. An explicit Log in overrides the
 URL credentials for that request; Log out clears the tab login, not the saved
 URL credentials. To remove those, edit the URL and Save.
