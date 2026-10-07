@@ -6,7 +6,7 @@
 
 Workspace: `C:/Users/FelipeTomazzi/projects/bpcGit`. Code repository:
 `https://github.com/felipetomazzi-source/bpcGit.git`, branch `main`.
-Application version is **0.18.3**. This code repository
+Application version is **0.18.4**. This code repository
 is distinct from the customer repositories holding serialized BPC content.
 
 Read `AGENTS.md`, this section and `docs/SPEC.md` before implementing. Target
