@@ -100,6 +100,32 @@ sap.ui.getCore().attachInit(function () {
       }
       check();
     });
+    QUnit.test('Commit message precedes a long object list', function (assert) {
+      var done = assert.async();
+      var component = sap.ui.component({ name: 'bpc.git', url: '/app/', settings: { embedded: true, environment: 'HOST_A' } });
+      var container = new ComponentContainer({ component: component });
+      container.placeAt('qunit-fixture');
+      var attempts = 0;
+      function check() {
+        if (!component.getModel('app').getProperty('/configured')) {
+          if (++attempts < 100) { setTimeout(check, 50); return; }
+          assert.ok(false, 'Configuration loaded'); container.destroy(); component.destroy(); done(); return;
+        }
+        var view = component.getRootControl();
+        var rows = [];
+        for (var i = 0; i < 60; i++) { rows.push({ name: 'Object ' + i, model: 'PLAN', folder: 'SCRIPTS', path: 'file' + i, status: 'NEW_BPC' }); }
+        view.getController()._openCommitDialog(rows);
+        var dialog = view.getDependents().filter(function (control) { return control.getMetadata().getName() === 'sap.m.Dialog'; }).pop();
+        sap.ui.getCore().applyChanges();
+        var content = dialog.getContent();
+        assert.ok(content[1].getMetadata().getName() === 'sap.m.Label' && content[2].getMetadata().getName() === 'sap.m.TextArea', 'Message label and editor come first');
+        assert.ok(content[4].getMetadata().getName() === 'sap.m.List' && content[4].getItems().length === 60, 'All selected objects follow the message');
+        dialog.getBeginButton().firePress();
+        assert.strictEqual(content[2].getValueState(), 'Error', 'Blank message still blocks commit');
+        dialog.close(); container.destroy(); component.destroy(); done();
+      }
+      check();
+    });
     QUnit.start();
   });
 });

@@ -899,3 +899,12 @@ Verified with real UI5 1.52 pointer events in the harness: group checkbox
 selects 50, row click expands/collapses, member uncheck shows "49 selected",
 header select/deselect all. Node 10/10 (new tests/group_ui.test.cjs), OPA 8/8
 (journey expects the group row).
+
+## Commit message placement (2026-10-08)
+
+Moved the commit message label/editor and error strip above the selected-object
+list. Commit validation and payload are unchanged. Added a UI5 1.52 harness
+case with 60 objects verifying editor placement and blank-message rejection.
+All 10 controller regression suites pass; headless OPA journey passes 8/8 and
+embedded suite 25/25 assertions. Formatter/check passed. SAP pull/activation
+of this UI change has not been performed in this task.
