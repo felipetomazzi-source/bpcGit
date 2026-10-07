@@ -1018,3 +1018,10 @@ A logic script is recorded as BPC's own transport records it: entity type
 `ASPR`, model, entity ID `ADMINAPP\<model>\<name>.LGF` (seen in UJT_GUID
 for a script transported from BPC). 0.18.0-0.18.1 recorded
 `ADMINAPP\<model>` instead; remove such entries from open requests.
+
+## Already-recorded check (0.18.3)
+
+An object is "already in the request" when its entry is in the request
+itself or in one of its modifiable tasks. Released tasks are ignored: their
+entries were copied to the request at release and may have been deleted
+there since. Already-present objects still count in `transport.count`.

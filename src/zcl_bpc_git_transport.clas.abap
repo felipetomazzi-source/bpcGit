@@ -62,6 +62,7 @@ CLASS zcl_bpc_git_transport DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_customizing TYPE trfunction VALUE 'W'.
     CONSTANTS c_customizing_task TYPE trfunction VALUE 'Q'.
     CONSTANTS c_modifiable TYPE trstatus VALUE 'D'.
+    CONSTANTS c_protected TYPE trstatus VALUE 'L'.
     CLASS-METHODS user_task
       IMPORTING iv_request TYPE trkorr
       RETURNING VALUE(rv_task) TYPE trkorr.
@@ -300,7 +301,11 @@ CLASS zcl_bpc_git_transport IMPLEMENTATION.
       MODIFY ujt_guid FROM TABLE lt_new_guids.
     ENDIF.
     DATA lt_requests TYPE RANGE OF trkorr.
-    SELECT trkorr FROM e070 WHERE strkorr = @iv_request OR trkorr = @iv_request
+    " A released task's entries live on in the request itself, where they may
+    " have been deleted since, so only the request and its open tasks count.
+    SELECT trkorr FROM e070
+      WHERE trkorr = @iv_request
+         OR ( strkorr = @iv_request AND ( trstatus = @c_modifiable OR trstatus = @c_protected ) )
       INTO TABLE @DATA(lt_request_ids).
     LOOP AT lt_request_ids INTO DATA(lv_request_id).
       APPEND VALUE #( sign = 'I' option = 'EQ' low = lv_request_id ) TO lt_requests.
