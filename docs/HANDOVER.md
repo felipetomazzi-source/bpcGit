@@ -102,7 +102,8 @@ formats, confirmed against CH_PLANNING UJT_GUID rows:
 - EPM workbook `AFLE`, model, `COMPANY\EEXCEL\...` or `<team>\EEXCEL\...`
 - Transformation/conversion `ADMF`, model, `COMPANY\DATAMANAGER\<folder>\<name>`
   without extension (definition + workbook are one entity)
-- Logic scripts `ASPR`, model, `ADMINAPP\<model>` (whole model folder)
+- Logic scripts `ASPR`, model, `ADMINAPP\<model>\<name>.LGF` (per script;
+  fixed in 0.18.2, before that the whole model folder was recorded)
 - Package `ADMP`, `CL_UJD_ENTITY_ADMP=>CONCAT_ENTITY_ID(team, group, id)`
 - Link `ADML`, model, link name; members `AMBR`, dimension (whole dimension)
 - BPF `ABPF`, `UJB_TMPL_HDR-TMPL_GUID` by `TECH_NAME`; team `ATEM`, task

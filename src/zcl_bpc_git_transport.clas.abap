@@ -174,11 +174,11 @@ CLASS zcl_bpc_git_transport IMPLEMENTATION.
         rs_entity-entity_type = 'ADMF'.
         rs_entity-entity_id = file_entity_id( iv_rest = lv_rest iv_strip_type = abap_true ).
       WHEN zcl_bpc_git_service=>c_kind-script.
-        " BPC transports the logic script folder of a model as one entity.
-        IF lines( lt_parts ) >= 2.
+        " BPC transports each logic script as ADMINAPP\<model>\<name>.LGF.
+        IF lines( lt_parts ) >= 3.
           rs_entity-application_id = to_upper( lt_parts[ 2 ] ).
           rs_entity-entity_type = 'ASPR'.
-          rs_entity-entity_id = |ADMINAPP\\{ rs_entity-application_id }|.
+          rs_entity-entity_id = |ADMINAPP\\{ rs_entity-application_id }\\{ lt_parts[ 3 ] }|.
         ENDIF.
       WHEN zcl_bpc_git_service=>c_kind-dimmember.
         " BPC transports all members of a dimension together.

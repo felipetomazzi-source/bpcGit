@@ -27,7 +27,7 @@ CLASS ltcl_entities IMPLEMENTATION.
       iv_application = `PROJPLAN` iv_type = `AFLE` iv_id = `Proj. Outturn Super\EEXCEL\BOOKS\M.XLSM` ).
     assert_entity( is_entity = zcl_bpc_git_transport=>entity_for_path( iv_environment = 'ENV'
         iv_kind = zcl_bpc_git_service=>c_kind-script iv_path = `ADMINAPP/AGGR_OPEX/CLEAR_DATA.LGF` )
-      iv_application = `AGGR_OPEX` iv_type = `ASPR` iv_id = `ADMINAPP\AGGR_OPEX` ).
+      iv_application = `AGGR_OPEX` iv_type = `ASPR` iv_id = `ADMINAPP\AGGR_OPEX\CLEAR_DATA.LGF` ).
   ENDMETHOD.
 
   METHOD data_manager.

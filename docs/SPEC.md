@@ -999,7 +999,8 @@ characters) creates one with a customizing task for the user on the default
 transport layer. After the restore, each object whose result is successful is
 recorded as BPC records it: `R3TR <ABPC or entity type> <GUID>` in the user's
 task, with the GUID taken from `UJT_GUID` or generated and stored there.
-Logic scripts are recorded per model and dimension members per dimension.
+Logic scripts are recorded per script (0.18.2) and dimension members per
+dimension.
 Deleted objects are not recorded. Recording failures do not undo the restore;
 the response member `transport` reports the request, the number of entries,
 an error, and skipped objects.
@@ -1010,3 +1011,10 @@ an error, and skipped objects.
 the BPC objects of the selected paths, as they are in BPC now, in the request
 under the same rules as restores. Objects that are not in BPC are reported as
 skipped. Nothing in BPC or Git changes.
+
+## Logic scripts transported per script (0.18.2)
+
+A logic script is recorded as BPC's own transport records it: entity type
+`ASPR`, model, entity ID `ADMINAPP\<model>\<name>.LGF` (seen in UJT_GUID
+for a script transported from BPC). 0.18.0-0.18.1 recorded
+`ADMINAPP\<model>` instead; remove such entries from open requests.
