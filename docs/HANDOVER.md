@@ -6,7 +6,7 @@
 
 Workspace: `C:/Users/FelipeTomazzi/projects/bpcGit`. Code repository:
 `https://github.com/felipetomazzi-source/bpcGit.git`, branch `main`.
-Application version is **0.18.4**. This code repository
+Application version is **0.19.0**. This code repository
 is distinct from the customer repositories holding serialized BPC content.
 
 Read `AGENTS.md`, this section and `docs/SPEC.md` before implementing. Target
@@ -882,3 +882,20 @@ entity_for_path. Recording reuses ZCL_BPC_GIT_TRANSPORT=>RECORD; response
 member transport as for restores. Picker has a required mode (no "No
 transport" option; last or first open request preselected). Node 9/9 incl.
 new add-to-transport checks; harness dialog renders. Live SAP test pending.
+
+## Grouped file list (0.19.0, 2026-10-08)
+
+User request: selecting everything in large lists (e.g. 50 logic scripts) was
+tedious. `/workbooksView` now holds group rows (`isGroup`, `kind`, `expanded`,
+`name` "Text (n)", `folder` "n selected", `selected` = all members selected)
+followed by their rows when expanded. `_applyFilter` stores the filtered rows
+in `this._shownRows` and calls `_buildView`; `GROUPS` gives labels and order.
+Group rows are `type="Active"`; `onGroupPress` (table itemPress) toggles
+`this._expanded[kind]`. A single group or a search is always expanded.
+`onSelectionChange`: selectAll selects all shown rows; a changed group item
+sets all its shown rows; object-only changes call `_refreshGroups` (updates
+group rows in place, keeps scroll). `_selectWhere` uses `_shownRows`.
+Verified with real UI5 1.52 pointer events in the harness: group checkbox
+selects 50, row click expands/collapses, member uncheck shows "49 selected",
+header select/deselect all. Node 10/10 (new tests/group_ui.test.cjs), OPA 8/8
+(journey expects the group row).

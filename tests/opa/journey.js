@@ -29,8 +29,10 @@ sap.ui.getCore().attachInit(function () {
           Opa5.assert.notOk(select.getEnabled(), 'Model selection is disabled for shared dimensions');
         }});
         When.waitFor({ controlType: 'sap.m.Button', matchers: function (button) { return button.getText() === 'Load'; }, actions: new Press() });
-        Then.waitFor({ id: 'workbookTable', check: function (table) { return table.getItems().length === 1 && !table.getBusy(); },
+        // One group row (expanded, as the only object type) and its member
+        Then.waitFor({ id: 'workbookTable', check: function (table) { return table.getItems().length === 2 && !table.getBusy(); },
           success: function (table) {
+            Opa5.assert.strictEqual(table.getItems()[0].getBindingContext('app').getObject().name, 'Dimension members (1)', 'Objects are grouped by type');
             Opa5.assert.strictEqual(table.getModel('app').getProperty('/loadedScope/dimension'), 'ACCOUNT', 'Selected dimension reaches the load');
             Opa5.assert.ok(table.getDomRef().textContent.indexOf('CASH TOTAL - Cash total') !== -1, 'Rendered member name uses a space');
           }});

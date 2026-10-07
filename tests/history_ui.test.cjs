@@ -58,7 +58,8 @@ function fixture(response) {
   const values = { '/workbooks': [row], '/environment': 'ENV' };
   const calls = [];
   const instance = Object.assign({}, controller, {
-    _model: { getProperty: function (key) { return values[key]; }, setProperty: function (key, value) { values[key] = value; } },
+    _model: { getProperty: function (key) { return values[key]; }, setProperty: function (key, value) { values[key] = value; },
+      refresh: function () {} },
     getView: function () { return { addDependent: function () {} }; },
     _gitRequest: function (resource, params) {
       calls.push({ resource: resource, params: params });

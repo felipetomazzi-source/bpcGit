@@ -4,7 +4,7 @@ Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
 package links, security definitions, BPF template designs and dimension members.
 The app is a UI5 BSP application, installed with abapGit into package `ZBPC_GIT`.
-Current version: **0.18.4**. Target runtime: ABAP 7.52 and UI5 1.52.
+Current version: **0.19.0**. Target runtime: ABAP 7.52 and UI5 1.52.
 
 Choose an object type and optional model, then **Load**. Select objects to
 commit, restore or inspect their history. EPM reports and input schedules have
@@ -26,8 +26,12 @@ After pulling with abapGit, the app runs at
 Use this UI5 path, not `/sap/bc/bsp/sap/...`: the BSP runtime rejects host
 names without a domain (`CX_FQDN`), such as `vhcalnplci`.
 
-## Latest updates (0.18.4)
+## Latest updates (0.19.0)
 
+- The file list is grouped by object type (EPM workbooks, logic scripts,
+  packages, ...). Click a group to expand or collapse it; its checkbox selects
+  or clears all its objects, including collapsed ones; the header checkbox
+  selects everything listed. A single type or a search shows objects expanded.
 - The transport dialogs no longer say logic scripts are transported per model.
 
 - An object can be added to a request again after a released task of that
