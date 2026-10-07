@@ -6,7 +6,7 @@
 
 Workspace: `C:/Users/FelipeTomazzi/projects/bpcGit`. Code repository:
 `https://github.com/felipetomazzi-source/bpcGit.git`, branch `main`.
-Application version is **0.18.1** (last commit `605c738`). This code repository
+Application version is **0.18.2** (last code commit `8caed86`). This code repository
 is distinct from the customer repositories holding serialized BPC content.
 
 Read `AGENTS.md`, this section and `docs/SPEC.md` before implementing. Target
@@ -32,12 +32,14 @@ Never echo `gitRepos` output: repository URLs there embed tokens.
 
 ### Open items, in order
 
-1. **0.18.1 is pushed but NOT in SAP.** The last two pulls failed with HTTP 401
-   (ADT login rejected; healthcheck still OK). After the user fixes the ADT
-   login (or pulls manually), pull, verify 0.18.1 is served, check inactive
-   objects and run ABAP Unit on ZCL_BPC_GIT_HTTP, ZCL_BPC_GIT_SERVICE,
-   ZCL_BPC_GIT_TRANSPORT. The new 0.18.1 ABAP (service TRANSPORT_ENTITIES, HTTP
-   HANDLE_RECORD_TRANSPORT) has never been syntax-checked in SAP.
+1. **0.18.2 is in SAP (2026-10-07).** Two pulls of 0.18.1 returned success
+   without applying anything; the pull of 0.18.2 (`8caed86`) applied. SAP
+   serves 0.18.2, no ZCL_BPC_GIT* object is inactive, ABAP Unit passes for
+   ZCL_BPC_GIT_TRANSPORT (4) and ZCL_BPC_GIT_HTTP (1); ZCL_BPC_GIT_SERVICE
+   has no tests. 0.18.2 fixes logic scripts: BPC transports them per script
+   (`ADMINAPP\<model>\<name>.LGF`, seen in the customer UJT_GUID), not per
+   model folder. A folder entry `ADMINAPP\DEMREV` recorded by 0.18.x at the
+   customer should be removed from its request.
 2. **Cloudflare cache.** `bpc.kwickast.co.nz` is behind Cloudflare, which caches
    `/sap/bc/ui5_ui5/...` files for a year (SAP sends max-age=31536000). The
    user's browser ran a 2-day-old App.controller.js with a new view, so the
