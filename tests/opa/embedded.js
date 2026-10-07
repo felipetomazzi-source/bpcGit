@@ -122,7 +122,20 @@ sap.ui.getCore().attachInit(function () {
         assert.ok(content[4].getMetadata().getName() === 'sap.m.List' && content[4].getItems().length === 60, 'All selected objects follow the message');
         dialog.getBeginButton().firePress();
         assert.strictEqual(content[2].getValueState(), 'Error', 'Blank message still blocks commit');
-        dialog.close(); container.destroy(); component.destroy(); done();
+        dialog.close();
+        var model = component.getModel('app');
+        var chosen = { path: 'DIMENSIONS/ACCOUNT/MEMBERS/CASH%20TOTAL.xml' };
+        var other = { path: 'DIMENSIONS/ACCOUNT/MEMBERS/OTHER.xml', status: 'MODIFIED_BPC' };
+        model.setProperty('/loadedScope', { kind: 'DIMMEMBER', model: 'ALL', dimension: 'ACCOUNT' });
+        model.setProperty('/overview', { commit: 'a'.repeat(40) });
+        model.setProperty('/workbooks', [chosen, other]);
+        view.getController()._refreshCommittedRows([chosen], 'b'.repeat(40)).then(function () {
+          var refreshed = model.getProperty('/workbooks');
+          assert.strictEqual(refreshed.length, 2, 'Targeted refresh retains unrelated objects');
+          assert.strictEqual(refreshed.filter(function (row) { return row.path === chosen.path; })[0].status, 'UNCHANGED', 'Committed row refreshed through mocked API');
+          assert.strictEqual(model.getProperty('/overview/commit'), 'b'.repeat(40), 'Head updated after selected-path refresh');
+          container.destroy(); component.destroy(); done();
+        });
       }
       check();
     });

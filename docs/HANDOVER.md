@@ -908,3 +908,19 @@ case with 60 objects verifying editor placement and blank-message rejection.
 All 10 controller regression suites pass; headless OPA journey passes 8/8 and
 embedded suite 25/25 assertions. Formatter/check passed. SAP pull/activation
 of this UI change has not been performed in this task.
+
+## Single-object commit refresh (0.19.1, 2026-10-08)
+
+Removed the full loaded-scope refresh after commit. Optional /workbooks paths
+reuse read_paths validation and get_overview selected-path/companion filtering.
+UI merges current selected rows, preserves unrelated rows, removes selected
+objects absent on both sides, and advances head only if it matches the push.
+Concurrent head changes and refresh failure report push success separately;
+scope sequence/environment guards prevent stale merges. Full abapGit branch
+pull in commit and scope metadata/generated-object listing remain potential
+costs. This is not evidence of a measured SAP latency improvement.
+
+New controller suite covers selected path payload, unrelated selection/status,
+deleted rows, concurrent head and stale replies. The UI5 1.52 harness exercises
+selected-path read-only mock refresh. ADT tools are not exposed in this session,
+so backend compilation and SAP pull/activation remain unverified.

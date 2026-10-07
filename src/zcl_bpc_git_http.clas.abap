@@ -456,6 +456,13 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'Security definitions apply to the environment; leave model empty' ).
       RETURN.
     ENDIF.
+    DATA lt_selected_paths TYPE string_table.
+    IF mo_server->request->get_form_field( 'paths' ) IS NOT INITIAL.
+      lt_selected_paths = read_paths( ).
+      IF mv_invalid = abap_true OR lt_selected_paths IS INITIAL.
+        RETURN.
+      ENDIF.
+    ENDIF.
     DATA lv_environment TYPE uj_appset_id.
     DATA ls_config TYPE zbpc_git_repo.
     DATA lo_remote TYPE REF TO zcl_bpc_git_remote.
@@ -468,7 +475,8 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
           RETURN.
         ENDIF.
         DATA(ls_overview) = io_service->get_overview( iv_environment = lv_environment
-                                                      io_remote = lo_remote iv_kind = lv_kind iv_model = lv_model iv_dimension = lv_dimension ).
+                                                      io_remote = lo_remote iv_kind = lv_kind iv_model = lv_model iv_dimension = lv_dimension
+                                                      it_paths = lt_selected_paths ).
       CATCH zcx_abapgit_exception INTO DATA(lx_git).
         respond_git_error( ix_error = lx_git iv_with_login = lv_with_login ).
         RETURN.

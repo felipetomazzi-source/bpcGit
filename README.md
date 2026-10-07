@@ -4,7 +4,7 @@ Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
 package links, security definitions, BPF template designs and dimension members.
 The app is a UI5 BSP application, installed with abapGit into package `ZBPC_GIT`.
-Current version: **0.19.0**. Target runtime: ABAP 7.52 and UI5 1.52.
+Current version: **0.19.1**. Target runtime: ABAP 7.52 and UI5 1.52.
 
 Choose an object type and optional model, then **Load**. Select objects to
 commit, restore or inspect their history. EPM reports and input schedules have
@@ -25,6 +25,20 @@ After pulling with abapGit, the app runs at
 `/sap/bc/ui5_ui5/sap/zbpc_git/index.html?sap-client=<client>`.
 Use this UI5 path, not `/sap/bc/bsp/sap/...`: the BSP runtime rejects host
 names without a domain (`CX_FQDN`), such as `vhcalnplci`.
+
+## Single-object commit refresh (0.19.1)
+
+After a successful commit, bpcGit now refreshes only the selected paths and
+merges their current statuses into the loaded overview. Unrelated rows remain
+in place. The optional `/workbooks` `paths` field uses one logical path per line
+and retains transformation/conversion companion handling. A changed branch
+head or failed status refresh is reported separately from the successful push.
+
+This removes the full-scope status refresh after committing. The commit itself
+still pulls the branch through abapGit and verifies its head; BPC metadata
+listing remains scoped by type/model/dimension. Large Git repositories and
+generated-object listing can therefore still contribute latency. SAP performance
+has not been measured for this change.
 
 ## Latest updates (0.19.0)
 
@@ -181,7 +195,7 @@ Base path: `/sap/bc/zbpc_git` (handler `ZCL_BPC_GIT_HTTP`)
 | POST | `/config` | Save it (`environment`, `url`, `branch`; optional `rootFolder`, `lfsEnabled`, `lfsThresholdMb`) |
 | POST | `/connection` | Test the connection (`environment`; optional `user`, `token`) |
 | POST | `/diagnostics` | Independent smart-HTTP read/push-advertisement checks (`environment`; optional `user`, `token`); no Git/BPC write |
-| POST | `/workbooks` | Tracked files in BPC and Git with their status (`environment`; optional `kind`, `model`, `dimension`, `user`, `token`); returns stage timings |
+| POST | `/workbooks` | Tracked files in BPC and Git with their status (`environment`; optional `kind`, `model`, `dimension`, `paths`, `user`, `token`); returns stage timings |
 | POST | `/commit` | Commit selected files (`environment`, `message`, `commit` = head seen, `paths` one per line; `user`, `token`) |
 | POST | `/restore` | Write a Git version into BPC (`environment`, `commit` = head seen, `paths`; optional `version`, `depth`, `user`, `token`) |
 | POST | `/history` | Changes to one item (`environment`, `path`; optional `depth`, `user`, `token`) |

@@ -1025,3 +1025,20 @@ An object is "already in the request" when its entry is in the request
 itself or in one of its modifiable tasks. Released tasks are ignored: their
 entries were copied to the request at release and may have been deleted
 there since. Already-present objects still count in `transport.count`.
+
+## Selected-path refresh after commit (0.19.1)
+
+/workbooks accepts optional newline-separated paths through the existing path
+validation, forwarding them to get_overview. Empty/omitted paths keep existing
+scope behavior. Filtering retains companion completeness and authorization;
+only requested paths and companions are compared/read. BPC metadata listing
+still runs for the authorized scope before path filtering.
+
+After a successful push the UI calls this read-only selected-path refresh,
+retains unrelated rows and merges returned rows, including removal of absent
+selected objects. It advances overview head only when the refreshed head equals
+the returned push head; concurrent changes require manual reload. Scope sequence
+and environment checks reject stale updates. Refresh failures say the commit
+succeeded and leave the old overview head so subsequent server-side head checks
+still refuse stale actions. No full-scope fallback runs automatically. Existing
+abapGit full branch pull/head validation during commit is unchanged.
