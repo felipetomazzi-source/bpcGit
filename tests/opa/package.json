@@ -2,7 +2,8 @@
   "name": "bpcgit-opa-tests",
   "private": true,
   "scripts": {
-    "start": "node server.cjs"
+    "start": "node server.cjs",
+    "test": "node run.cjs"
   },
   "devDependencies": {
     "@openui5/sap.m": "1.52.48",

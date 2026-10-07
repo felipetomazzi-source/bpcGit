@@ -18,6 +18,17 @@ Dependencies are pinned and installed only under `tests/opa/node_modules`.
 The local server compiles the original 1.52 Belize theme through SAP's
 `less-openui5`; it does not depend on a public UI5 CDN or change deployed files.
 
+Run both suites headless in one command (starts and stops the server, uses
+the installed Chrome or Edge, exits non-zero on failure):
+
+```powershell
+node tests/opa/run.cjs
+```
+
+Set `BPCGIT_BROWSER` to a browser executable to choose one. A suite that
+fails is run once more, because a cold harness occasionally fails loading a
+UI5 module; a real failure fails both times and its assertions are printed.
+
 To drive the same page with the Playwright CLI:
 
 ```powershell
