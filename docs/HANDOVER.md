@@ -1,142 +1,158 @@
 # bpcGit: handover
 
-## Current handover — 2026-10-06 (read this before the historical notes)
+## Current handover - 2026-10-07 (read this before the historical notes)
 
 ### Project and working rules
 
 Workspace: `C:/Users/FelipeTomazzi/projects/bpcGit`. Code repository:
 `https://github.com/felipetomazzi-source/bpcGit.git`, branch `main`.
-Application version is **0.18.1**. This code repository is distinct from the
-customer repositories holding serialized BPC content.
+Application version is **0.18.1** (last commit `605c738`). This code repository
+is distinct from the customer repositories holding serialized BPC content.
 
-Read `AGENTS.md`, this current handover, and `docs/SPEC.md` before implementing.
-Target ABAP 7.52, UI5 1.52 and ES5 JavaScript. Commit and push completed tasks to
-`origin/main` after appropriate checks without asking again. Preserve unrelated
-work. `.dummy_bitbucket` is an untracked local credential file: never commit it,
-print its contents, or copy credentials into documentation. The last observed
-working tree had no tracked changes; only that file was untracked.
+Read `AGENTS.md`, this section and `docs/SPEC.md` before implementing. Target
+ABAP 7.52, UI5 1.52 and ES5 JavaScript. Run `python tools/abapgit_fmt.py`, then
+`--check`, after changes under `src/`. Commit and push completed tasks to
+`origin/main` without asking. Preserve unrelated work. `.dummy_bitbucket` is an
+untracked local credential file: never commit, print or copy it.
 
-Use ADT MCP for SAP code reads/checks. Do not write source directly via ADT or
-other tools. The current AGENTS.md authorizes pulling pushed project code into
-SAP through abapGit; preserve unrelated SAP changes and report conflicts.
-Activation/browser testing remain with the user unless separately authorized.
-Earlier transcript permissions and historical deployment notes do not replace
-these current project rules. Do not create a new agent/chat unless requested.
+SAP access: use the `npl-adt` MCP only for reading/checking SAP code and data
+(do not use `npl-bpc` for that; do not write SAP source directly). Both MCP
+servers read `NPL_URL` (`https://bpc.kwickast.co.nz/` from home,
+`http://vhcalnplci:8000` at work). Same NPL system, client 001.
 
-### Latest pushed changes
+Deployment: after every push, pull into SAP with `npl-adt` gitPullRepo, repoId
+`000000000006` (package ZBPC_GIT, `refs/heads/main`), transport `NPLK900106`
+(without a transport the pull fails "Transport not found"). The pull may return
+`{"status":"success","result":[]}` WITHOUT applying anything: always verify,
+e.g. `/sap/bc/adt/filestore/ui5-bsp/objects/ZBPC_GIT%2fmanifest.json/content`
+shows the pushed version, `DWINACTIV` has no `ZCL_BPC_GIT%` rows, and ABAP Unit
+passes. Retry once; otherwise ask the user to pull manually. Activation of
+anything left inactive and browser testing remain with the user.
+Never echo `gitRepos` output: repository URLs there embed tokens.
 
-| Commit | Result |
-| --- | --- |
-| `1fb2719` | 0.17.4: process affected dimensions after member restores |
-| `dcf076a` | GitHub PAT documentation |
-| `3df99be` | Authorize abapGit pulls in AGENTS.md |
-| `cb16a0f` | 0.17.5: preserve credential-bearing URLs and saved branch |
-| `76951ee` | 0.17.6: reduce invalid CHAR2048 URL field to CHAR1024 |
-| `1538d14` | Align URL XML with SAP serialization; version stays 0.17.6 |
+### Open items, in order
 
-All entries above were pushed to main. The documentation handover update that
-contains this section follows them; use `git log` for its commit identity.
-No successful SAP deployment of these latest backend changes is claimed.
+1. **0.18.1 is pushed but NOT in SAP.** The last two pulls failed with HTTP 401
+   (ADT login rejected; healthcheck still OK). After the user fixes the ADT
+   login (or pulls manually), pull, verify 0.18.1 is served, check inactive
+   objects and run ABAP Unit on ZCL_BPC_GIT_HTTP, ZCL_BPC_GIT_SERVICE,
+   ZCL_BPC_GIT_TRANSPORT. The new 0.18.1 ABAP (service TRANSPORT_ENTITIES, HTTP
+   HANDLE_RECORD_TRANSPORT) has never been syntax-checked in SAP.
+2. **Cloudflare cache.** `bpc.kwickast.co.nz` is behind Cloudflare, which caches
+   `/sap/bc/ui5_ui5/...` files for a year (SAP sends max-age=31536000). The
+   user's browser ran a 2-day-old App.controller.js with a new view, so the
+   root folder field showed empty and the header showed "Branch: undefined".
+   Saving was never broken (ZBPC_GIT_REPO root_folder = `bpc`). The user was
+   told to purge the cache and add a Cache Rule bypassing
+   `/sap/bc/ui5_ui5/*`. Confirm it was done (Claude in Chrome: fetch
+   `controller/App.controller.js` and check `cf-cache-status` / content). An
+   app-side cache-buster was offered but not built.
+3. **Transport features untested live.** Nobody has yet created a request,
+   recorded objects, or released/imported one. Suggested first test: restore
+   or "Add to transport" one EPM workbook with a new request, then check
+   SE09/SE10 for `R3TR ABPC <GUID>` in the user's task (and the E071/UJT_GUID
+   rows via ADT) before releasing.
+4. Older pending validations still apply: Bitbucket history/diff/LFS routing
+   live, live LFS upload/restore (now possible after the 0.17.7 fix), member
+   restore processing on an authorized test dimension.
 
-### Current behavior and implementation
+### Built in this session (2026-10-06/07)
 
-Repository setup intentionally stores complete HTTPS `user:token@host` URLs and
-returns them to authorized environment users. This is an explicit user choice;
-do not reintroduce 0.15.3's stripping/import behavior. Explicit tab login
-credentials override embedded credentials for requests. Log out removes only
-the tab login; remove URL credentials by editing the URL and saving.
+| Commit | Version | Change |
+| --- | --- | --- |
+| `6355363` | 0.17.7 | LFS pointer parse fix |
+| `cfdb0fd` | 0.17.8 | Repository setup panel at top, repo/branch in header |
+| `edddffe` | 0.17.9 | "Change" link in the setup header |
+| `698ca54` | 0.17.10 | Branches load when the branch dropdown opens |
+| `8543551`, `3e5e603`, `c8dd869` | 0.18.0 | Customizing transport on restore |
+| `605c738` | 0.18.1 | "Add to transport" without restoring |
 
-Remote `parse_repository_url` extracts credentials into request-local fields,
-percent-decodes them, preserves literal plus, colon and equals signs, and cleans
-only the transport URL. Bitbucket API and LFS detection therefore still work.
-Smart HTTP uses Basic; Bitbucket REST uses Bearer for username `x-token-auth`.
-The URL format itself is userinfo, not a Bearer header. Correct Bitbucket form:
-`https://x-token-auth:YOUR_TOKEN@bitbucket.org/WORKSPACE/REPO.git`.
-A missing colon triggers the error shown by the user's latest screenshot;
-that was malformed input, not a new backend defect. Repository exclusivity
-compares addresses without credentials. Diagnostics must not expose tokens.
+Confirmed in SAP at the start: ZBPC_GIT_REPO URL is CHAR1024 and active; the
+serializer alignment (`1538d14`) left no diff; ADT reads/unit tests work.
 
-ZBPC_GIT_REPO URL is now built-in CHAR1024 with internal Unicode length 2048.
-The tested SAP system rejected length 2048 characters (maximum reported 1333).
-The API derives input length from DDIC and rejects overlong input before
-assignment. Canonical URL DD03P ordering from the user's SAP diff is FIELDNAME,
-ADMINFIELD, INTTYPE, INTLEN, DATATYPE, LENG, MASK. MASK is two spaces then CHAR;
-COMPTYPE must be absent. Adding COMPTYPE or omitting MASK causes a persistent
-abapGit diff even after repeated pulls. Do not confuse bytes with characters.
+**0.17.7 LFS fix.** `ZCL_BPC_GIT_LFS=>PARSE` rejected every canonical pointer
+(ABAP SPLIT creates no empty segment for a trailing newline), so LFS upload,
+download and comparison could never work. Now: 3 lines + exact canonical text
+match. ABAP Unit for LFS and remote classes all pass in SAP.
 
-The branch ComboBox binds to `/branches`, separate from `/connection/branches`.
-`_showConfig` seeds the list with the saved branch before configuration binding.
-Connection results include the currently saved/typed branch even if absent from
-advertised branches; changing URL clears stale choices while preserving it.
-No automatic initial branch-network request was introduced.
+**0.17.8-0.17.10 UI.** The Repository setup Panel sits above the load
+controls; its headerToolbar shows the saved repository (`repositoryLabel` strips
+scheme, userinfo and `.git`) and saved branch (`/savedRepositoryLabel`,
+`/savedBranch`, set in `_showConfig`). UI5 1.52 has no ValueState
+"Information". "Change" (`onChangeRepository`) expands the panel and focuses
+`branchInput` after the slideToggle (`$().children(".sapMPanelContent")
+.promise()`). Opening the branch ComboBox calls `onBranchListOpen` via
+`getPicker().attachBeforeOpen` in `onInit` (protected API; `loadItems` only
+fires for empty lists): loads branches once per saved URL; "Load branches"
+remains as refresh.
 
-Dimension member labels show decoded ID plus description, falling back to ID.
-Current/historical member and BPF restores use logical paths, not blob hashes.
-Member restore invokes IF_UJA_MEMBER_MANAGER~PROCESS once per affected dimension
-with validation on and no request to set the environment offline. Failed saves
-skip that dimension's processing. A processing failure reports saved but not
-confirmed active and removes sync baselines; saved changes are not rolled back.
-Processing includes all pending edits in that dimension. Other object types are
-unaffected. Track BPF templates only, never instances. Security tracks teams,
-task profiles and data access profile definitions; users/assignments stay local.
+**0.18.0 customizing transports on restore.** Researched in SAP: BPC's own
+transport (`CL_UJT_TRANS_MGR=>CREATE_REQUEST`) creates type W requests with Q
+tasks and appends `R3TR <tlogo> <GUID>` via TR_APPEND_TO_COMM. GUIDs map BPC
+entities in `UJT_GUID` (RSTLOGO `ABPC`); `UJT_ENTITY_CLASS-F_GENERIC_TLOGO = X`
+means E071 object `ABPC`, otherwise the entity type itself. `CL_UJT_TLOGO_ABPC`
+exports content at release; `UJT_TLOGO_AFTER_IMPORT` imports. The user
+confirmed requests must be customizing and use the default layer.
+`ZCL_BPC_GIT_TRANSPORT`: `open_requests` (W, status D, this client, user has an
+open task), `create_request` (TR_INSERT_REQUEST_WITH_TASKS, no target),
+`check_request`, `entity_for_path`/`package_entity`/`link_entity`, `record`
+(reuses UJT_GUID mapping or generates via `CL_UJT_UTILITY=>GENERATE_GUID` and
+inserts it; skips entries already in the request; all-or-nothing). Entity
+formats, confirmed against CH_PLANNING UJT_GUID rows:
+- EPM workbook `AFLE`, model, `COMPANY\EEXCEL\...` or `<team>\EEXCEL\...`
+- Transformation/conversion `ADMF`, model, `COMPANY\DATAMANAGER\<folder>\<name>`
+  without extension (definition + workbook are one entity)
+- Logic scripts `ASPR`, model, `ADMINAPP\<model>` (whole model folder)
+- Package `ADMP`, `CL_UJD_ENTITY_ADMP=>CONCAT_ENTITY_ID(team, group, id)`
+- Link `ADML`, model, link name; members `AMBR`, dimension (whole dimension)
+- BPF `ABPF`, `UJB_TMPL_HDR-TMPL_GUID` by `TECH_NAME`; team `ATEM`, task
+  profile `ATPF`, data access profile `ADAF`, by ID
+Deletions are not recorded (BPC uses UJT_TRANS_DEL). HTTP: `GET /transports`,
+`POST /transport` (text), restore field `transport` (checked before any BPC
+change; response member `transport` {request,count,error,skipped}; only
+successful results recorded). UI: `_createTransportPicker` in both restore
+dialogs; UI5 1.52 Select needs a non-empty key for "No transport request"
+(`__NONE__`).
+
+**0.18.1 Add to transport.** Toolbar button "Add to transport (n)", enabled
+when all selected rows are in BPC. `POST /transport/record` (environment,
+transport, paths) maps paths with `ZCL_BPC_GIT_SERVICE=>TRANSPORT_ENTITIES`
+from BPC only (files need the UJF_DOC document; packages/links use BPC's own
+definitions via list_packages/list_links) and records them with the same
+`record`. Picker required mode: no "No transport" option, last or first open
+request preselected.
+
+Checks: Node 9/9 suites (`tests/transport_ui.test.cjs`,
+`tests/repository_summary_ui.test.cjs` added); OPA 7/7 and embedded 22/22 in
+the actual UI5 1.52 harness (mock API); ABAP Unit for ZCL_BPC_GIT_TRANSPORT
+(4 entity-format tests) passed in SAP for 0.18.0.
 
 ### Entry points and files
 
-Standalone URL: `/sap/bc/ui5_ui5/sap/zbpc_git/index.html?sap-client=<client>`.
-API: `/sap/bc/zbpc_git/`, handler ZCL_BPC_GIT_HTTP. Independent UI5 component:
-namespace `bpc.git`, URL `/sap/bc/ui5_ui5/sap/zbpc_git/`. BPCIO owns the embedded
-shell/header and theme; component supports embedded/environment settings,
-setEnvironment and navigateBack. Preserve standalone operation.
+Standalone URL: `/sap/bc/ui5_ui5/sap/zbpc_git/index.html?sap-client=001`.
+API: `/sap/bc/zbpc_git/`, handler ZCL_BPC_GIT_HTTP (POSTs need header
+`X-Requested-With: XMLHttpRequest`). Component namespace `bpc.git`; BPCIO
+embeds it; preserve standalone operation.
 
-- `src/zbpc_git.wapa.controller_-app.controller.js`: setup, branch list, UI/API.
-- `src/zbpc_git.wapa.view_-app.view.xml`: actual UI5 view and ComboBox binding.
-- `src/zbpc_git_repo.tabl.xml`: URL/root/LFS repository configuration DDIC.
-- `src/zcl_bpc_git_remote.clas.abap`: URL parsing, Git, Bitbucket API, LFS routing.
-- `src/zcl_bpc_git_http.clas.abap`: length validation and credential preflight.
-- `src/zcl_bpc_git_service.clas.abap`: repository validation and restore/process.
-- `tests/repository_login_ui.test.cjs`: URL preservation/branch regressions.
-- `tests/opa/embedded.js`: actual UI5 1.52 component/branch browser checks.
+- `src/zbpc_git.wapa.controller_-app.controller.js`, `..._view_-app.view.xml`
+- `src/zcl_bpc_git_http.clas.abap`, `src/zcl_bpc_git_service.clas.abap`
+- `src/zcl_bpc_git_transport.clas.abap` (+ testclasses)
+- `src/zcl_bpc_git_lfs.clas.abap`, `src/zcl_bpc_git_remote.clas.abap`
+- `tests/*.test.cjs`, `tests/opa/` (harness, `node tests/opa/server.cjs`,
+  http://127.0.0.1:4173 and /embedded.html)
 
-Root folder remains configurable: empty uses legacy repository root; `bpc`
-allows a shared ABAP/BPC repository while preserving unrelated Git files.
-Changing the setting does not move files and clears sync baselines. History
-before a move is not followed automatically. Combining large workbook content
-with ABAP can slow abapGit refresh; path exclusions do not establish partial
-Git transfer. Do not undertake repository migration without a concrete request.
-
-### Validation and immediate follow-up
-
-Seven Node regression suites passed for 0.17.5. Playwright's local actual UI5
-1.52 embedded harness passed **22/22 assertions**, including saved branch,
-advertisements, manual input and config reload. These tests use mocked API data,
-not a live customer SAP system. The 0.17.6 and serializer corrections passed
-formatter/check and targeted XML assertions. The earlier 0.17.4 service syntax
-check passed with pre-existing ABAP Doc warnings. Latest ADT source and syntax
-calls returned HTTP 400, so current backend compilation and ABAP Unit execution
-remain unverified. No credentials or BPC objects were committed during tests.
-
-First establish SAP state: confirm the remote commit includes `1538d14`, the
-CHAR1024 table and dependent classes are active, and Refresh All clears the table
-diff. The user has not yet confirmed that the serializer correction cleared it.
-Then verify Save/reload with a correctly formatted URL, branch persistence,
-connection/branch listing, and Bitbucket history/diff/LFS routing. Confirm member
-restore processing on an authorized test dimension. Live LFS upload/restore is
-still pending; small files below the threshold do not test LFS. If ADT remains
-unavailable, report that instead of treating local tests as SAP syntax checks.
-No additional feature has been selected for implementation yet.
-
-Useful local commands:
+Useful commands:
 
 ```text
 python tools/abapgit_fmt.py
 python tools/abapgit_fmt.py --check
+git -c core.whitespace=-blank-at-eol diff --check
 node --test tests/*.test.cjs
 node tests/opa/server.cjs
 ```
 
-Run the formatter after src changes; WAPA lines intentionally contain padding.
-For Git whitespace checks use `git -c core.whitespace=-blank-at-eol diff --check`
-to allow that mandated padding. Browser harness: http://127.0.0.1:4173/embedded.html.
+This file is cp1252; README/SPEC are UTF-8. WAPA lines are padded to 255
+characters by the formatter.
 
 ## Historical implementation notes (may describe superseded behavior)
 
