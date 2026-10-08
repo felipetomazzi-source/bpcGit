@@ -958,3 +958,7 @@ split read_branch network download/pack decoding/tree traversal costs.
 ## 0.19.4 Git read diagnostics
 
 Added request-local read_branch phase timings to load and commit API responses and the performance log. gitPullMs wraps installed abapGit pull_by_branch, combining network, pack decoding and tree extraction; it does not identify those internal phases separately. Inspect installed abapGit via ADT before attempting deeper instrumentation. SAP deployment and syntax validation pending if ADT unavailable.
+
+## 0.19.5 Full snapshot reuse
+
+ADT available again: installed ZCL_ABAPGIT_GIT_TRANSPORT/PORCELAIN/PACK inspected read-only. Decoder uses decompression/recompression and possible ABAP zlib fallback; no runtime attribution yet. Added volatile full pull snapshots in INDX(bf), validated against fresh branch advertisement before reuse. Existing metadata cache remains independent. Payload cap 64 MiB. Push result new_objects/new_files seeds new head. ABAP Unit regression covers same-head reuse, changed-head fallback, restored blob data and access denial. Cold pulls still expensive. Current ADT exposes reads only, so SAP syntax/unit validation and deployment require separate available tooling.

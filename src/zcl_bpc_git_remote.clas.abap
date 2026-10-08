@@ -168,6 +168,8 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RAISING zcx_abapgit_exception.
   PRIVATE SECTION.
     DATA ms_read_timings TYPE ty_read_timings.
+    METHODS cache_snapshot
+      IMPORTING iv_key TYPE csequence is_pull TYPE zcl_abapgit_git_porcelain=>ty_pull_result.
     CONSTANTS c_heads TYPE string VALUE 'refs/heads/' ##NO_TEXT.
     DATA mv_url TYPE string.
     DATA mv_root TYPE string.
@@ -436,6 +438,25 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+  METHOD cache_snapshot.
+    " Volatile, user-scoped acceleration only; cap uncompressed payload at 64 MiB.
+    DATA lv_bytes TYPE int8.
+    LOOP AT is_pull-objects ASSIGNING FIELD-SYMBOL(<ls_object>).
+      lv_bytes = lv_bytes + xstrlen( <ls_object>-data ).
+    ENDLOOP.
+    LOOP AT is_pull-files ASSIGNING FIELD-SYMBOL(<ls_file>).
+      lv_bytes = lv_bytes + xstrlen( <ls_file>-data ).
+    ENDLOOP.
+    IF lv_bytes > 67108864 OR is_pull-objects IS INITIAL OR is_pull-commit IS INITIAL.
+      RETURN.
+    ENDIF.
+    TRY.
+        EXPORT snapshot = is_pull TO SHARED BUFFER indx(bf) ID iv_key.
+      CATCH cx_root.
+        " A cache failure must not change the result of a read or successful push.
+    ENDTRY.
+  ENDMETHOD.
+
   METHOD get_read_timings.
     rs_timings = ms_read_timings.
   ENDMETHOD.
@@ -447,7 +468,10 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     GET RUN TIME FIELD lv_time_start.
     CLEAR: mv_branch_ref, mv_commit, mt_files, mt_objects, mt_pulled, mt_lfs.
     DATA(lv_ref) = c_heads && iv_branch.
-    DATA(lt_branches) = zcl_abapgit_git_transport=>branches( mv_url )->get_branches_only( ).
+    DATA lt_branches TYPE zif_abapgit_git_definitions=>ty_git_branch_list_tt.
+    TEST-SEAM snapshot_refs.
+      lt_branches = zcl_abapgit_git_transport=>branches( mv_url )->get_branches_only( ).
+    END-TEST-SEAM.
     GET RUN TIME FIELD lv_time_end.
     ms_read_timings-git_refs_ms = ( lv_time_end - lv_time_start ) / 1000.
     GET RUN TIME FIELD lv_time_start.
@@ -455,8 +479,7 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       RETURN.
     ENDIF.
     rs_content-branch_found = abap_true.
-    " Cache only path/hash metadata. Verify current read access and head above
-    " on every request; commits and restores always pull the full fresh tree.
+    " Verify read access and advertised head before using either volatile cache.
     DATA lv_cache_key TYPE c LENGTH 40.
     lv_cache_key = blob_sha1( cl_abap_codepage=>convert_to(
       |root-v1/{ mv_root }/{ sy-mandt }/{ sy-uname }/{ mv_cache_user }/{ mv_url }/{ lv_ref }| ) ).
@@ -478,12 +501,26 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       ENDTRY.
     ENDIF.
 
+    DATA ls_pull TYPE zcl_abapgit_git_porcelain=>ty_pull_result.
+    TRY.
+        IMPORT snapshot = ls_pull FROM SHARED BUFFER indx(bf) ID lv_cache_key.
+        IF sy-subrc <> 0 OR ls_pull-objects IS INITIAL
+            OR to_lower( ls_pull-commit ) <> to_lower( lt_branches[ KEY name_key name = lv_ref ]-sha1 ).
+          CLEAR ls_pull.
+        ENDIF.
+      CATCH cx_sy_import_mismatch_error.
+        CLEAR ls_pull.
+    ENDTRY.
     GET RUN TIME FIELD lv_time_end.
     ms_read_timings-git_cache_ms = ( lv_time_end - lv_time_start ) / 1000.
     GET RUN TIME FIELD lv_time_start.
-    DATA(ls_pull) = zcl_abapgit_git_porcelain=>pull_by_branch( iv_url = mv_url iv_branch_name = lv_ref ).
-    GET RUN TIME FIELD lv_time_end.
-    ms_read_timings-git_pull_ms = ( lv_time_end - lv_time_start ) / 1000.
+    IF ls_pull-commit IS INITIAL.
+      TEST-SEAM snapshot_pull.
+        ls_pull = zcl_abapgit_git_porcelain=>pull_by_branch( iv_url = mv_url iv_branch_name = lv_ref ).
+      END-TEST-SEAM.
+      GET RUN TIME FIELD lv_time_end.
+      ms_read_timings-git_pull_ms = ( lv_time_end - lv_time_start ) / 1000.
+    ENDIF.
     GET RUN TIME FIELD lv_time_start.
     rs_content-commit = to_lower( ls_pull-commit ).
     LOOP AT ls_pull-files INTO DATA(ls_file).
@@ -509,6 +546,7 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     GET RUN TIME FIELD lv_time_start.
     " Shared buffer may evict entries at any time; a miss simply pulls again.
     EXPORT metadata = rs_content TO SHARED BUFFER indx(bg) ID lv_cache_key.
+    cache_snapshot( iv_key = lv_cache_key is_pull = ls_pull ).
     scope_content( CHANGING cs_content = rs_content ).
     GET RUN TIME FIELD lv_time_end.
     ms_read_timings-git_cache_ms = ms_read_timings-git_cache_ms + ( lv_time_end - lv_time_start ) / 1000.
@@ -1062,6 +1100,8 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
                                                      iv_parent = mv_commit
                                                      iv_url = mv_url
                                                      iv_branch_name = mv_branch_ref ).
+    cache_snapshot( iv_key = lv_cache_key is_pull = VALUE #(
+      commit = ls_push-branch objects = ls_push-new_objects files = ls_push-new_files ) ).
     rv_commit = to_lower( ls_push-branch ).
     ls_metadata-commit = rv_commit.
     TRY.

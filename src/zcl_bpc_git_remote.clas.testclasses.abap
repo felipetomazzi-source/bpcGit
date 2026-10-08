@@ -265,3 +265,53 @@ CLASS ltcl_auth_diagnostics IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 ENDCLASS.
+
+CLASS ltcl_snapshot_cache DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
+  PUBLIC SECTION.
+    CLASS-DATA head TYPE zif_abapgit_git_definitions=>ty_sha1.
+    CLASS-DATA pulls TYPE i.
+    CLASS-DATA denied TYPE abap_bool.
+  PRIVATE SECTION.
+    METHODS reuse_and_invalidate FOR TESTING RAISING zcx_abapgit_exception.
+ENDCLASS.
+CLASS ltcl_snapshot_cache IMPLEMENTATION.
+  METHOD reuse_and_invalidate.
+    DATA key TYPE c LENGTH 40.
+    key = zcl_bpc_git_remote=>blob_sha1( cl_abap_codepage=>convert_to(
+      |root-v1//{ sy-mandt }/{ sy-uname }//https://example.invalid/snapshot-test.git/refs/heads/main| ) ).
+    DELETE FROM SHARED BUFFER indx(bf) ID key.
+    CLEAR: pulls, denied.
+    head = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'.
+    TEST-INJECTION snapshot_refs.
+      IF ltcl_snapshot_cache=>denied = abap_true.
+        zcx_abapgit_exception=>raise( 'Read denied' ).
+      ENDIF.
+      lt_branches = VALUE #( ( name = lv_ref sha1 = ltcl_snapshot_cache=>head ) ).
+    END-TEST-INJECTION.
+    TEST-INJECTION snapshot_pull.
+      ltcl_snapshot_cache=>pulls = ltcl_snapshot_cache=>pulls + 1.
+      ls_pull-commit = ltcl_snapshot_cache=>head.
+      ls_pull-objects = VALUE #( ( type = zif_abapgit_git_definitions=>c_type-blob
+        sha1 = ltcl_snapshot_cache=>head data = '4142' ) ).
+      ls_pull-files = VALUE #( ( path = '/M/EEXCEL/' filename = 'TEST.XLS'
+        sha1 = ltcl_snapshot_cache=>head data = '4142' ) ).
+    END-TEST-INJECTION.
+    DATA(remote) = NEW zcl_bpc_git_remote( iv_url = 'https://example.invalid/snapshot-test.git' ).
+    DATA(first) = remote->read_branch( 'main' ).
+    DATA(second) = remote->read_branch( 'main' ).
+    cl_abap_unit_assert=>assert_equals( act = pulls exp = 1 msg = 'Same head reuses full snapshot' ).
+    cl_abap_unit_assert=>assert_equals( act = second exp = first ).
+    cl_abap_unit_assert=>assert_equals( act = remote->get_content( 'M/EEXCEL/TEST.XLS' ) exp = CONV xstring( '4142' ) ).
+    head = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'.
+    DATA(changed) = remote->read_branch( 'main' ).
+    cl_abap_unit_assert=>assert_equals( act = pulls exp = 2 msg = 'New head pulls again' ).
+    cl_abap_unit_assert=>assert_equals( act = changed-commit exp = CONV string( head ) ).
+    denied = abap_true.
+    TRY.
+        remote->read_branch( 'main' ).
+        cl_abap_unit_assert=>fail( 'Cached snapshot must not bypass access check' ).
+      CATCH zcx_abapgit_exception.
+    ENDTRY.
+    DELETE FROM SHARED BUFFER indx(bf) ID key.
+  ENDMETHOD.
+ENDCLASS.

@@ -1061,3 +1061,7 @@ renders JSON for copying. A commit title timer shows elapsed seconds and is
 cleared on success, failure or dialog destruction. Browser and server timings
 have different boundaries; this is diagnostic instrumentation, not streaming
 SAP progress or proof of performance improvement.
+
+## Verified full snapshot cache (0.19.5)
+
+Full read_branch requests first authenticate/check the branch advertisement. Only an exact advertised head match permits volatile snapshot reuse in INDX(bf). Keys include SAP client/user, Git username, clean repository URL, root and branch. Snapshots contain decoded objects and complete repository files, capped at 64 MiB combined uncompressed payload; credentials are excluded. Missing/mismatched/evicted snapshots fall back to the original abapGit pull. Push publication stores new_objects/new_files returned by abapGit under the new head. Existing expected-head and receive-pack concurrency guards remain. Cache writes are best-effort. This supersedes earlier descriptions of unconditional fresh full pulls.

@@ -4,7 +4,7 @@ Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
 package links, security definitions, BPF template designs and dimension members.
 The app is a UI5 BSP application, installed with abapGit into package `ZBPC_GIT`.
-Current version: **0.19.4**. Target runtime: ABAP 7.52 and UI5 1.52.
+Current version: **0.19.5**. Target runtime: ABAP 7.52 and UI5 1.52.
 
 Choose an object type and optional model, then **Load**. Select objects to
 commit, restore or inspect their history. EPM reports and input schedules have
@@ -291,9 +291,10 @@ scope. Workbook subtype, status, location and search filters apply to loaded row
 The first Git read pulls the branch snapshot. Subsequent reads may reuse its
 path/hash metadata from SAP's shared buffer after checking current Git access
 and the advertised branch head. Cache entries are isolated by SAP client/user,
-Git username, repository and branch; no tokens or file content are cached.
-Eviction or a moved branch triggers a fresh pull. Commit and restore always pull
-fresh content. Git still needs repository-wide metadata; the BPC scan is scoped.
+Git username, repository, root and branch; tokens are never cached. Full file
+content and decoded Git objects may be retained in volatile shared memory
+(up to 64 MiB combined payload) for commits and restores. Fresh access/head
+checks precede reuse; eviction or a moved branch triggers a full pull. Git still needs repository-wide metadata; the BPC scan is scoped.
 
 The overview shows elapsed seconds. Its tooltip reports SAP listing, Git and
 comparison milliseconds (also available as `timings` in `/workbooks`). Use these
@@ -468,4 +469,6 @@ per repository restriction remains in place.
 
 Dimension members display `ID - description`, using the current BPC working-copy description. Members without a description, including Git-only members, display the ID without `.xml`. Stored Git paths remain unchanged and no extra Git content downloads are needed for labels.
 
-Git read diagnostics: `gitRefsMs` measures branch discovery; `gitPullMs` measures the full abapGit pull (network, pack decoding and tree extraction combined); `gitFilesMs` measures file indexing; `gitLfsMs` measures LFS indexing; `gitCacheMs` measures metadata cache and scope handling. These are request-local numeric timings, with no credentials or paths. Cached loads can have zero pull time; commits require a fresh full pull.
+Git read diagnostics: `gitRefsMs` measures branch discovery; `gitPullMs` measures the full abapGit pull (network, pack decoding and tree extraction combined); `gitFilesMs` measures file indexing; `gitLfsMs` measures LFS indexing; `gitCacheMs` measures metadata cache and scope handling. These are request-local numeric timings, with no credentials or paths. Cached loads can have zero pull time; commits require a verified full snapshot, fetched on a cache miss.
+
+Full Git snapshots are now cached in volatile SAP shared memory per repository, branch, root, SAP client/user and Git username. Each request verifies current read access and branch head before reuse. Changed heads and evictions fall back to a full pull. Successful pushes seed the new snapshot. Uncompressed object/file payloads above 64 MiB are not cached. A first uncached commit can still be slow; this does not eliminate cold pulls.
