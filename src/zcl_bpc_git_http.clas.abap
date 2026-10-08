@@ -543,7 +543,8 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
                     iv_expected_commit = lv_expected
                     iv_git_user = mo_server->request->get_form_field( 'user' )
           IMPORTING ev_error = lv_error
-                    ev_commit = lv_commit ).
+                    ev_commit = lv_commit
+                    es_timings = DATA(ls_timings) ).
       CATCH zcx_abapgit_exception INTO DATA(lx_git).
         respond_git_error( ix_error = lx_git iv_with_login = lv_with_login ).
         RETURN.
@@ -555,7 +556,14 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     ENDIF.
     respond( iv_code = 200 iv_reason = 'OK' iv_json =
       `{"commit":` && quote( lv_commit ) &&
-      `,"count":` && |{ lines( lt_paths ) }| && `}` ).
+      `,"count":` && |{ lines( lt_paths ) }| &&
+      `,"timings":{"bpcMs":` && |{ ls_timings-bpc_ms }| &&
+      `,"gitMs":` && |{ ls_timings-git_ms }| &&
+      `,"compareMs":` && |{ ls_timings-compare_ms }| &&
+      `,"prepareMs":` && |{ ls_timings-prepare_ms }| &&
+      `,"pushMs":` && |{ ls_timings-push_ms }| &&
+      `,"syncMs":` && |{ ls_timings-sync_ms }| &&
+      `,"totalMs":` && |{ ls_timings-total_ms }| && `}}` ).
   ENDMETHOD.
 
   METHOD handle_restore.

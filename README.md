@@ -4,7 +4,7 @@ Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
 package links, security definitions, BPF template designs and dimension members.
 The app is a UI5 BSP application, installed with abapGit into package `ZBPC_GIT`.
-Current version: **0.19.1**. Target runtime: ABAP 7.52 and UI5 1.52.
+Current version: **0.19.2**. Target runtime: ABAP 7.52 and UI5 1.52.
 
 Choose an object type and optional model, then **Load**. Select objects to
 commit, restore or inspect their history. EPM reports and input schedules have
@@ -25,6 +25,25 @@ After pulling with abapGit, the app runs at
 `/sap/bc/ui5_ui5/sap/zbpc_git/index.html?sap-client=<client>`.
 Use this UI5 path, not `/sap/bc/bsp/sap/...`: the BSP runtime rejects host
 names without a domain (`CX_FQDN`), such as `vhcalnplci`.
+
+## Commit performance log (0.19.2)
+
+Use **Performance log** beside Commit to copy the last 50 timing events from
+this page. Events are also written to the browser console as `bpcGit performance`.
+The commit dialog title shows elapsed seconds while waiting. Commit and status
+refresh have separate started/completed/failed events and browser elapsed time.
+
+Successful commits return server timings in milliseconds: `bpcMs` (BPC listing),
+`gitMs` (branch read), `compareMs` (selected comparison), `prepareMs` (selection,
+reading selected BPC content, hashing and author lookup), `pushMs` (LFS upload,
+staging, Git pack/push and metadata cache publication), `syncMs` (sync-state
+saving), and `totalMs`. Refresh events report their own listing/read/comparison
+timings. Server stage timings arrive after completion, not as live progress.
+Failed requests retain client elapsed time but do not include server timings.
+Logs are page-local, not database logs, and omit tokens, repository URLs, commit
+messages, paths and object contents. Copy the log after one slow commit to
+identify the expensive stage. Browser elapsed includes transport and any login
+interaction; it is not exclusively SAP processing time.
 
 ## Single-object commit refresh (0.19.1)
 

@@ -924,3 +924,22 @@ New controller suite covers selected path payload, unrelated selection/status,
 deleted rows, concurrent head and stale replies. The UI5 1.52 harness exercises
 selected-path read-only mock refresh. ADT tools are not exposed in this session,
 so backend compilation and SAP pull/activation remain unverified.
+
+## Commit diagnostics (0.19.2, 2026-10-08)
+
+User still reports slow commits after targeted refresh. Added stage timing
+exports to service and successful /commit JSON. Log separates BPC listing,
+Git read, comparison, preparation, combined LFS/stage/push/cache, state saving,
+server total and client round-trip/refresh. No persistent backend logs. UI has
+Performance log (50 allowlisted events, copyable JSON), console.info events and
+elapsed seconds in the pending commit title. Tokens/URLs/messages/paths/content
+are excluded. Failed requests log client duration only; stage timings are not
+streamed. Obtain a slow real commit log before choosing the next optimization.
+ADT/SAP deployment remains unverified in this session. Local harness covers
+performance dialog and read-only refresh timing fixtures; no live commit made.
+
+Validation for 0.19.2: 13 controller suites passed; the headless UI5 harness
+passed 8/8 journey and 30/30 embedded assertions (cold journey retry passed).
+Formatter and whitespace checks passed. The harness caught JSON braces being
+interpreted as binding syntax in TextArea constructor settings; setValue fixes
+the copied log display. No SAP syntax check or live commit was run.

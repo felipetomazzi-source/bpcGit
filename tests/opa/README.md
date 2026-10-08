@@ -47,8 +47,10 @@ acceptance after abapGit activation.
 
 Open `/embedded.html` on the same local server for the BPCIO embedding contract journey, including a host dark theme and standalone recreation. All API fixtures remain local and read-only.
 
-The embedded suite expects 28 assertions, including message placement above a
+The embedded suite expects 30 assertions, including message placement above a
 60-object commit list and required-message validation.
 
 Selected-path commit refresh uses only the read-only mock API, preserving
 unrelated rows while updating the committed object and overview head.
+
+The performance dialog reports allowlisted timing events without credentials.

@@ -55,7 +55,7 @@ http.createServer(async (req, res) => {
           return;
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ branch: 'main', branchFound: true, commit: (params.get('paths') ? 'b' : 'a').repeat(40),
+        res.end(JSON.stringify({ branch: 'main', branchFound: true, commit: (params.get('paths') ? 'b' : 'a').repeat(40), timings: { bpcMs: 10, gitMs: 20, compareMs: 5 },
           workbooks: [{ path: 'DIMENSIONS/ACCOUNT/MEMBERS/CASH%20TOTAL.xml', kind: 'DIMMEMBER',
             model: '', team: '', status: params.get('paths') ? 'UNCHANGED' : 'MODIFIED_BPC', memberDescription: 'Cash total', generated: true }] }));
       });

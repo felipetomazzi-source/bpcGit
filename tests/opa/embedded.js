@@ -134,6 +134,16 @@ sap.ui.getCore().attachInit(function () {
           assert.strictEqual(refreshed.length, 2, 'Targeted refresh retains unrelated objects');
           assert.strictEqual(refreshed.filter(function (row) { return row.path === chosen.path; })[0].status, 'UNCHANGED', 'Committed row refreshed through mocked API');
           assert.strictEqual(model.getProperty('/overview/commit'), 'b'.repeat(40), 'Head updated after selected-path refresh');
+          view.getController().onPerformanceLog();
+          sap.ui.getCore().applyChanges();
+          var logDialog = view.getDependents().filter(function (control) { return control.getTitle && control.getTitle() === 'Performance log'; }).pop();
+          var entries = JSON.parse(logDialog.getContent()[1].getValue());
+          assert.strictEqual(entries[entries.length - 1].operation, 'commit-refresh', 'Performance dialog includes refresh event');
+          assert.strictEqual(entries[entries.length - 1].state, 'completed', 'Performance dialog shows completed state');
+          logDialog.close();
+          container.destroy(); component.destroy(); done();
+        }).catch(function (error) {
+          assert.ok(false, error.stack || error.message);
           container.destroy(); component.destroy(); done();
         });
       }

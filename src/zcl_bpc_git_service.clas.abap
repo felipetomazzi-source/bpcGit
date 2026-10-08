@@ -146,6 +146,15 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     "! records them as synced. Refuses, with ev_error for the user, if the
     "! branch has moved past iv_expected_commit (the head the user saw) or a
     "! workbook's status does not allow a commit (see is_committable).
+    TYPES: BEGIN OF ty_commit_timings,
+             bpc_ms TYPE i,
+             git_ms TYPE i,
+             compare_ms TYPE i,
+             prepare_ms TYPE i,
+             push_ms TYPE i,
+             sync_ms TYPE i,
+             total_ms TYPE i,
+           END OF ty_commit_timings.
     METHODS commit_workbooks
       IMPORTING iv_environment TYPE uj_appset_id
                 io_remote TYPE REF TO zcl_bpc_git_remote
@@ -155,6 +164,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_git_user TYPE string OPTIONAL
       EXPORTING ev_error TYPE string
                 ev_commit TYPE string
+                es_timings TYPE ty_commit_timings
       RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
     "! Writes the Git version of the given files into BPC (F5): creates or
     "! overwrites them, or deletes those deleted in Git, and records them as
@@ -866,7 +876,11 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     DATA lt_synced TYPE STANDARD TABLE OF zbpc_git_state WITH DEFAULT KEY.
     DATA lt_unsynced TYPE STANDARD TABLE OF uj_docname WITH DEFAULT KEY.
     DATA lv_document TYPE xstring.
-    CLEAR: ev_error, ev_commit.
+    CLEAR: ev_error, ev_commit, es_timings.
+    DATA lv_started TYPE i.
+    DATA lv_phase TYPE i.
+    DATA lv_finished TYPE i.
+    GET RUN TIME FIELD lv_started.
 
     IF condense( iv_message ) = ``.
       ev_error = 'Enter a commit message'.
@@ -882,6 +896,10 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     selection_scope( EXPORTING it_paths = it_paths IMPORTING ev_kind = DATA(lv_scope_kind) ev_model = DATA(lv_scope_model) ev_dimension = DATA(lv_scope_dimension) ).
     DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote
       iv_individual = abap_true iv_kind = lv_scope_kind iv_model = lv_scope_model iv_dimension = lv_scope_dimension it_paths = it_paths ).
+    es_timings-bpc_ms = ls_overview-bpc_ms.
+    es_timings-git_ms = ls_overview-git_ms.
+    es_timings-compare_ms = ls_overview-compare_ms.
+    GET RUN TIME FIELD lv_phase.
     IF ls_overview-branch_found = abap_false.
       ev_error = |Branch { ls_config-branch } does not exist in the repository yet. | &&
                  |Create it on the Git host first, for example by adding a README file.|.
@@ -925,10 +943,17 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
 
     zcl_bpc_git_remote=>get_author( EXPORTING iv_user = sy-uname iv_git_user = iv_git_user
                                     IMPORTING ev_name = DATA(lv_author) ev_email = DATA(lv_email) ).
+    GET RUN TIME FIELD lv_finished.
+    es_timings-prepare_ms = ( lv_finished - lv_phase ) / 1000.
+    GET RUN TIME FIELD lv_phase.
     ev_commit = io_remote->commit( it_changes = lt_changes
                                    iv_message = iv_message
                                    iv_author_name = lv_author
                                    iv_author_email = lv_email ).
+
+    GET RUN TIME FIELD lv_finished.
+    es_timings-push_ms = ( lv_finished - lv_phase ) / 1000.
+    GET RUN TIME FIELD lv_phase.
 
     " Pushed: record what Git now holds for these documents
     DATA lv_now TYPE timestampl.
@@ -942,6 +967,9 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       DELETE FROM zbpc_git_state WHERE appset = @iv_environment AND docname = @lv_docname.
     ENDLOOP.
     COMMIT WORK.
+    GET RUN TIME FIELD lv_finished.
+    es_timings-sync_ms = ( lv_finished - lv_phase ) / 1000.
+    es_timings-total_ms = ( lv_finished - lv_started ) / 1000.
   ENDMETHOD.
 
   METHOD restore_files.

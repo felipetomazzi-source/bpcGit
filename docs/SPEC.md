@@ -1042,3 +1042,22 @@ and environment checks reject stale updates. Refresh failures say the commit
 succeeded and leave the old overview head so subsequent server-side head checks
 still refuse stale actions. No full-scope fallback runs automatically. Existing
 abapGit full branch pull/head validation during commit is unchanged.
+
+## Commit timing diagnostics (0.19.2)
+
+commit_workbooks exports ty_commit_timings; successful /commit replies add a
+timings object with bpcMs, gitMs, compareMs, prepareMs, pushMs, syncMs and totalMs.
+GET RUN TIME FIELD measures milliseconds without persisted logs. Existing
+get_overview timings provide listing/Git/comparison boundaries. pushMs covers
+all remote commit work including LFS/staging/cache, not only network upload.
+Failure response shape/authentication handling is unchanged; partial backend
+stage timings are not emitted for failed commits.
+
+The browser stores at most 50 allowlisted events in the current model and
+writes the same data to console.info. Events carry UTC time, operation, state,
+elapsedMs, selected object count and allowlisted numeric timings. No raw errors,
+URL, credentials, object paths/content or commit messages are copied. A dialog
+renders JSON for copying. A commit title timer shows elapsed seconds and is
+cleared on success, failure or dialog destruction. Browser and server timings
+have different boundaries; this is diagnostic instrumentation, not streaming
+SAP progress or proof of performance improvement.
