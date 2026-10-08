@@ -141,7 +141,17 @@ sap.ui.getCore().attachInit(function () {
           assert.strictEqual(entries[entries.length - 1].operation, 'commit-refresh', 'Performance dialog includes refresh event');
           assert.strictEqual(entries[entries.length - 1].state, 'completed', 'Performance dialog shows completed state');
           logDialog.close();
-          container.destroy(); component.destroy(); done();
+          model.setProperty('/loadScope', { kind: 'DIMMEMBER', model: 'ALL', dimension: 'ACCOUNT' });
+          view.getController()._loadWorkbooks(true);
+          var tries = 0;
+          function checkLoad() {
+            if (model.getProperty('/workbooksBusy') && ++tries < 100) { setTimeout(checkLoad, 50); return; }
+            var loadLog = model.getProperty('/performanceLog');
+            assert.strictEqual(loadLog[loadLog.length - 1].operation, 'load', 'Manual Load captured in performance log');
+            assert.strictEqual(loadLog[loadLog.length - 1].timings.gitMs, 20, 'Load includes server Git timing');
+            container.destroy(); component.destroy(); done();
+          }
+          checkLoad();
         }).catch(function (error) {
           assert.ok(false, error.stack || error.message);
           container.destroy(); component.destroy(); done();

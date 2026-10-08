@@ -18,3 +18,21 @@ assert.ok(!JSON.stringify(log).includes('fake-secret'));
 assert.ok(!JSON.stringify(log).includes('private'));
 assert.match(methods._openCommitDialog.toString(), /_recordPerformance\("commit", "failed"/);
 console.log('Performance event allowlist and retention checks passed');
+
+(async function () {
+  data['/environment'] = 'ENV';
+  data['/loadScope'] = { kind: 'SCRIPT', model: 'MODEL' };
+  c._toRow = x => x; c._applyFilter = () => {}; c._updateSelection = () => {};
+  c._gitRequest = async () => ({ branch: 'main', branchFound: true, commit: 'head',
+    workbooks: [{path:'MODEL/SCRIPTS/A.LGF'}], timings: {gitMs:74,bpcMs:1,compareMs:2} });
+  c._loadWorkbooks(true); await new Promise(r => setImmediate(r));
+  let last = data['/performanceLog'].at(-1);
+  assert.equal(last.operation, 'load'); assert.equal(last.state, 'completed');
+  assert.equal(last.timings.gitMs, 74); assert.equal(last.objects, 1);
+  c._loadWorkbooks(false); await new Promise(r => setImmediate(r));
+  assert.equal(data['/performanceLog'].at(-1).operation, 'refresh');
+  c._gitRequest = async () => { throw {cancelled: true}; };
+  c._loadWorkbooks(false); await new Promise(r => setImmediate(r));
+  assert.equal(data['/performanceLog'].at(-1).state, 'cancelled');
+  console.log('Manual load/refresh timing checks passed');
+})().catch(error => { console.error(error); process.exitCode = 1; });

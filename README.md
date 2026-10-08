@@ -4,7 +4,7 @@ Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
 package links, security definitions, BPF template designs and dimension members.
 The app is a UI5 BSP application, installed with abapGit into package `ZBPC_GIT`.
-Current version: **0.19.2**. Target runtime: ABAP 7.52 and UI5 1.52.
+Current version: **0.19.3**. Target runtime: ABAP 7.52 and UI5 1.52.
 
 Choose an object type and optional model, then **Load**. Select objects to
 commit, restore or inspect their history. EPM reports and input schedules have
@@ -30,8 +30,10 @@ names without a domain (`CX_FQDN`), such as `vhcalnplci`.
 
 Use **Performance log** beside Commit to copy the last 50 timing events from
 this page. Events are also written to the browser console as `bpcGit performance`.
-The commit dialog title shows elapsed seconds while waiting. Commit and status
-refresh have separate started/completed/failed events and browser elapsed time.
+The commit dialog title shows elapsed seconds while waiting. Commit, its targeted status refresh, and manual Load/Refresh have separate
+started/completed/failed events and browser elapsed time. Manual Load/Refresh
+completion records include BPC, Git and comparison timings and returned object
+count. A started load has count zero because the result is not known yet.
 
 Successful commits return server timings in milliseconds: `bpcMs` (BPC listing),
 `gitMs` (branch read), `compareMs` (selected comparison), `prepareMs` (selection,

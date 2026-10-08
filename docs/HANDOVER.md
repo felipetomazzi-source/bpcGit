@@ -943,3 +943,14 @@ passed 8/8 journey and 30/30 embedded assertions (cold journey retry passed).
 Formatter and whitespace checks passed. The harness caught JSON braces being
 interpreted as binding syntax in TextArea constructor settings; setValue fixes
 the copied log display. No SAP syntax check or live commit was run.
+
+## Manual load/refresh diagnostics (0.19.3, 2026-10-08)
+
+User supplied a real two-object commit log: 78,845 ms client, 74,378 ms Git
+read, 486 ms BPC listing, 3,559 ms combined push, and 922 ms post-push refresh.
+This isolates that sample's bottleneck to Git read, not BPC serialization.
+Manual Load and Refresh now record started/completed/failed/cancelled events;
+completion includes existing overview stage timings and returned row count.
+Stale replies are ignored. UI5 harness now verifies a real mocked manual load
+produces a load event and Git timing. Next performance investigation should
+split read_branch network download/pack decoding/tree traversal costs.
