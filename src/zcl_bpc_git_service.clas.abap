@@ -50,6 +50,11 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         workbooks    TYPE ty_workbooks,
         bpc_ms       TYPE i,
         git_ms       TYPE i,
+        git_refs_ms TYPE i,
+        git_pull_ms TYPE i,
+        git_files_ms TYPE i,
+        git_lfs_ms TYPE i,
+        git_cache_ms TYPE i,
         compare_ms   TYPE i,
       END OF ty_overview.
     CONSTANTS:
@@ -149,6 +154,11 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     TYPES: BEGIN OF ty_commit_timings,
              bpc_ms TYPE i,
              git_ms TYPE i,
+        git_refs_ms TYPE i,
+        git_pull_ms TYPE i,
+        git_files_ms TYPE i,
+        git_lfs_ms TYPE i,
+        git_cache_ms TYPE i,
              compare_ms TYPE i,
              prepare_ms TYPE i,
              push_ms TYPE i,
@@ -574,6 +584,13 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       iv_metadata_only = xsdbool( iv_individual = abap_false ) ).
     GET RUN TIME FIELD lv_end.
     rs_overview-git_ms = ( lv_end - lv_start ) / 1000.
+    DATA(ls_read_timings) = io_remote->get_read_timings( ).
+    rs_overview-git_refs_ms = ls_read_timings-git_refs_ms.
+    rs_overview-git_pull_ms = ls_read_timings-git_pull_ms.
+    rs_overview-git_files_ms = ls_read_timings-git_files_ms.
+    rs_overview-git_lfs_ms = ls_read_timings-git_lfs_ms.
+    rs_overview-git_cache_ms = ls_read_timings-git_cache_ms.
+
     GET RUN TIME FIELD lv_start.
     rs_overview-branch_found = ls_branch-branch_found.
     rs_overview-commit = ls_branch-commit.
@@ -898,6 +915,12 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       iv_individual = abap_true iv_kind = lv_scope_kind iv_model = lv_scope_model iv_dimension = lv_scope_dimension it_paths = it_paths ).
     es_timings-bpc_ms = ls_overview-bpc_ms.
     es_timings-git_ms = ls_overview-git_ms.
+    es_timings-git_refs_ms = ls_overview-git_refs_ms.
+    es_timings-git_pull_ms = ls_overview-git_pull_ms.
+    es_timings-git_files_ms = ls_overview-git_files_ms.
+    es_timings-git_lfs_ms = ls_overview-git_lfs_ms.
+    es_timings-git_cache_ms = ls_overview-git_cache_ms.
+
     es_timings-compare_ms = ls_overview-compare_ms.
     GET RUN TIME FIELD lv_phase.
     IF ls_overview-branch_found = abap_false.

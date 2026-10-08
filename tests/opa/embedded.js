@@ -149,6 +149,8 @@ sap.ui.getCore().attachInit(function () {
             var loadLog = model.getProperty('/performanceLog');
             assert.strictEqual(loadLog[loadLog.length - 1].operation, 'load', 'Manual Load captured in performance log');
             assert.strictEqual(loadLog[loadLog.length - 1].timings.gitMs, 20, 'Load includes server Git timing');
+            assert.strictEqual(loadLog[loadLog.length - 1].timings.gitPullMs, 12, 'Load log includes full pull phase');
+            assert.strictEqual(loadLog[loadLog.length - 1].timings.gitRefsMs, 4, 'Load log includes branch discovery phase');
             container.destroy(); component.destroy(); done();
           }
           checkLoad();

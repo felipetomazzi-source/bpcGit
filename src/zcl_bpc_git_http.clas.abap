@@ -503,7 +503,12 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       `,"branchFound":` && COND string( WHEN ls_overview-branch_found = abap_true THEN `true` ELSE `false` ) &&
       `,"commit":` && quote( ls_overview-commit ) &&
       `,"timings":{"bpcMs":` && |{ ls_overview-bpc_ms }| &&
-      `,"gitMs":` && |{ ls_overview-git_ms }| && `,"compareMs":` && |{ ls_overview-compare_ms }| && `}` &&
+      `,"gitMs":` && |{ ls_overview-git_ms }| &&
+      `,"gitRefsMs":` && |{ ls_overview-git_refs_ms }| &&
+      `,"gitPullMs":` && |{ ls_overview-git_pull_ms }| &&
+      `,"gitFilesMs":` && |{ ls_overview-git_files_ms }| &&
+      `,"gitLfsMs":` && |{ ls_overview-git_lfs_ms }| &&
+      `,"gitCacheMs":` && |{ ls_overview-git_cache_ms }| && `,"compareMs":` && |{ ls_overview-compare_ms }| && `}` &&
       `,"workbooks":[` && lv_json && `]}` ).
   ENDMETHOD.
 
@@ -559,6 +564,11 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       `,"count":` && |{ lines( lt_paths ) }| &&
       `,"timings":{"bpcMs":` && |{ ls_timings-bpc_ms }| &&
       `,"gitMs":` && |{ ls_timings-git_ms }| &&
+      `,"gitRefsMs":` && |{ ls_timings-git_refs_ms }| &&
+      `,"gitPullMs":` && |{ ls_timings-git_pull_ms }| &&
+      `,"gitFilesMs":` && |{ ls_timings-git_files_ms }| &&
+      `,"gitLfsMs":` && |{ ls_timings-git_lfs_ms }| &&
+      `,"gitCacheMs":` && |{ ls_timings-git_cache_ms }| &&
       `,"compareMs":` && |{ ls_timings-compare_ms }| &&
       `,"prepareMs":` && |{ ls_timings-prepare_ms }| &&
       `,"pushMs":` && |{ ls_timings-push_ms }| &&

@@ -4,7 +4,7 @@ Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
 package links, security definitions, BPF template designs and dimension members.
 The app is a UI5 BSP application, installed with abapGit into package `ZBPC_GIT`.
-Current version: **0.19.3**. Target runtime: ABAP 7.52 and UI5 1.52.
+Current version: **0.19.4**. Target runtime: ABAP 7.52 and UI5 1.52.
 
 Choose an object type and optional model, then **Load**. Select objects to
 commit, restore or inspect their history. EPM reports and input schedules have
@@ -467,3 +467,5 @@ report differences without an old three-way baseline. Existing single-environmen
 per repository restriction remains in place.
 
 Dimension members display `ID - description`, using the current BPC working-copy description. Members without a description, including Git-only members, display the ID without `.xml`. Stored Git paths remain unchanged and no extra Git content downloads are needed for labels.
+
+Git read diagnostics: `gitRefsMs` measures branch discovery; `gitPullMs` measures the full abapGit pull (network, pack decoding and tree extraction combined); `gitFilesMs` measures file indexing; `gitLfsMs` measures LFS indexing; `gitCacheMs` measures metadata cache and scope handling. These are request-local numeric timings, with no credentials or paths. Cached loads can have zero pull time; commits require a fresh full pull.

@@ -136,6 +136,14 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RAISING zcx_abapgit_exception.
     "! Paths and blob hashes of all files at the head of a branch. Keeps the
     "! Git objects, so that commit can build on this head.
+    TYPES: BEGIN OF ty_read_timings,
+             git_refs_ms TYPE i,
+             git_pull_ms TYPE i,
+             git_files_ms TYPE i,
+             git_lfs_ms TYPE i,
+             git_cache_ms TYPE i,
+           END OF ty_read_timings.
+    METHODS get_read_timings RETURNING VALUE(rs_timings) TYPE ty_read_timings.
     METHODS read_branch
       IMPORTING iv_branch TYPE csequence iv_metadata_only TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rs_content) TYPE ty_branch_content
@@ -159,6 +167,7 @@ CLASS zcl_bpc_git_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING VALUE(rv_commit) TYPE string
       RAISING zcx_abapgit_exception.
   PRIVATE SECTION.
+    DATA ms_read_timings TYPE ty_read_timings.
     CONSTANTS c_heads TYPE string VALUE 'refs/heads/' ##NO_TEXT.
     DATA mv_url TYPE string.
     DATA mv_root TYPE string.
@@ -427,10 +436,21 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+  METHOD get_read_timings.
+    rs_timings = ms_read_timings.
+  ENDMETHOD.
+
   METHOD read_branch.
+    CLEAR ms_read_timings.
+    DATA lv_time_start TYPE i.
+    DATA lv_time_end TYPE i.
+    GET RUN TIME FIELD lv_time_start.
     CLEAR: mv_branch_ref, mv_commit, mt_files, mt_objects, mt_pulled, mt_lfs.
     DATA(lv_ref) = c_heads && iv_branch.
     DATA(lt_branches) = zcl_abapgit_git_transport=>branches( mv_url )->get_branches_only( ).
+    GET RUN TIME FIELD lv_time_end.
+    ms_read_timings-git_refs_ms = ( lv_time_end - lv_time_start ) / 1000.
+    GET RUN TIME FIELD lv_time_start.
     IF NOT line_exists( lt_branches[ KEY name_key name = lv_ref ] ).
       RETURN.
     ENDIF.
@@ -449,6 +469,8 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
             rs_content = ls_cached.
             mt_lfs = ls_cached-lfs.
             scope_content( CHANGING cs_content = rs_content ).
+            GET RUN TIME FIELD lv_time_end.
+            ms_read_timings-git_cache_ms = ( lv_time_end - lv_time_start ) / 1000.
             RETURN.
           ENDIF.
         CATCH cx_sy_import_mismatch_error.
@@ -456,7 +478,13 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       ENDTRY.
     ENDIF.
 
+    GET RUN TIME FIELD lv_time_end.
+    ms_read_timings-git_cache_ms = ( lv_time_end - lv_time_start ) / 1000.
+    GET RUN TIME FIELD lv_time_start.
     DATA(ls_pull) = zcl_abapgit_git_porcelain=>pull_by_branch( iv_url = mv_url iv_branch_name = lv_ref ).
+    GET RUN TIME FIELD lv_time_end.
+    ms_read_timings-git_pull_ms = ( lv_time_end - lv_time_start ) / 1000.
+    GET RUN TIME FIELD lv_time_start.
     rs_content-commit = to_lower( ls_pull-commit ).
     LOOP AT ls_pull-files INTO DATA(ls_file).
       " abapGit paths start and end with a slash, e.g. /AGGR_OPEX/EEXCEL/
@@ -472,10 +500,18 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     mt_files = rs_content-files.
     mt_objects = ls_pull-objects.
     mt_pulled = ls_pull-files.
+    GET RUN TIME FIELD lv_time_end.
+    ms_read_timings-git_files_ms = ( lv_time_end - lv_time_start ) / 1000.
+    GET RUN TIME FIELD lv_time_start.
     index_lfs( CHANGING cs_content = rs_content ).
+    GET RUN TIME FIELD lv_time_end.
+    ms_read_timings-git_lfs_ms = ( lv_time_end - lv_time_start ) / 1000.
+    GET RUN TIME FIELD lv_time_start.
     " Shared buffer may evict entries at any time; a miss simply pulls again.
     EXPORT metadata = rs_content TO SHARED BUFFER indx(bg) ID lv_cache_key.
     scope_content( CHANGING cs_content = rs_content ).
+    GET RUN TIME FIELD lv_time_end.
+    ms_read_timings-git_cache_ms = ms_read_timings-git_cache_ms + ( lv_time_end - lv_time_start ) / 1000.
   ENDMETHOD.
 
   METHOD tree_signature.

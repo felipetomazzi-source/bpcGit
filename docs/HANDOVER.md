@@ -954,3 +954,7 @@ completion includes existing overview stage timings and returned row count.
 Stale replies are ignored. UI5 harness now verifies a real mocked manual load
 produces a load event and Git timing. Next performance investigation should
 split read_branch network download/pack decoding/tree traversal costs.
+
+## 0.19.4 Git read diagnostics
+
+Added request-local read_branch phase timings to load and commit API responses and the performance log. gitPullMs wraps installed abapGit pull_by_branch, combining network, pack decoding and tree extraction; it does not identify those internal phases separately. Inspect installed abapGit via ADT before attempting deeper instrumentation. SAP deployment and syntax validation pending if ADT unavailable.

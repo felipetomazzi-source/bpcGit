@@ -8,11 +8,13 @@ vm.runInNewContext(fs.readFileSync('src/zbpc_git.wapa.controller_-app.controller
 const data={};
 const c=Object.assign({},methods,{_model:{getProperty:p=>data[p],setProperty:(p,v)=>{data[p]=v;}}});
 for(let i=0;i<60;i++) c._recordPerformance('commit','completed',Date.now()-10,1,
- {bpcMs:1,gitMs:2,pushMs:3,totalMs:6,token:'fake-secret',url:'https://fake-secret@example.invalid',message:'private'});
+ {bpcMs:1,gitMs:2,gitRefsMs:10,gitPullMs:65000,gitFilesMs:2,gitLfsMs:1,gitCacheMs:3,pushMs:3,totalMs:6,token:'fake-secret',url:'https://fake-secret@example.invalid',message:'private'});
 const log=data['/performanceLog'];
 assert.equal(log.length,50);
 assert.equal(log[0].objects,1);
 assert.equal(log[0].timings.gitMs,2);
+assert.equal(log[0].timings.gitPullMs,65000);
+assert.equal(log[0].timings.gitRefsMs,10);
 assert.ok(log[0].elapsedMs>=0);
 assert.ok(!JSON.stringify(log).includes('fake-secret'));
 assert.ok(!JSON.stringify(log).includes('private'));
