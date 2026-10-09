@@ -94,3 +94,12 @@ delete information, fingerprints and stale heads. Service ABAP Unit tests cover
 action mapping, preview returning without restore results/transport entities,
 and stale-head refusal through test seams. All four ABAP tests passed after abapGit installation in SAP; the local mock
 does not execute the ABAP backend.
+
+## Notebook test-branch extension (0.20.0)
+
+On `codex/notebook-versioning`, Notebook previews add `currentNotebookRevision`
+per file. Execution additionally requires the `notebookRevisions` JSON form field
+binding each selected logical Notebook to its loaded saved revision. Provider
+validation operates on the full source bundle and checks CAS during import.
+See [Notebook versioning](NOTEBOOK_VERSIONING.md). This extension is not yet on
+main or installed in SAP; clients must not assume it from the 0.19.6 contract.

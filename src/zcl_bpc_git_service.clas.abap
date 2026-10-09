@@ -33,6 +33,8 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         generated   TYPE abap_bool,
         content     TYPE xstring,
         member_description TYPE string,
+        notebook_revision TYPE i,
+        notebook_title TYPE string,
         members     TYPE string_table,
       END OF ty_workbook,
       ty_workbooks TYPE STANDARD TABLE OF ty_workbook WITH DEFAULT KEY.
@@ -41,6 +43,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         path    TYPE string,
         ok      TYPE abap_bool,
         message TYPE string,
+        notebook_revision TYPE i,
       END OF ty_restore_result,
       ty_restore_results TYPE STANDARD TABLE OF ty_restore_result WITH DEFAULT KEY.
     TYPES:
@@ -60,6 +63,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS:
       BEGIN OF c_kind,
         workbook       TYPE string VALUE 'WORKBOOK',
+        notebook       TYPE string VALUE 'NOTEBOOK',
         bpf            TYPE string VALUE 'BPF',
         dimmember      TYPE string VALUE 'DIMMEMBER',
         team           TYPE string VALUE 'TEAM',
@@ -187,6 +191,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
              source_sha1 TYPE string,
              current_bpc_sha1 TYPE string,
              validation_error TYPE string,
+             current_notebook_revision TYPE i,
            END OF ty_preview_file,
            ty_preview_files TYPE STANDARD TABLE OF ty_preview_file WITH DEFAULT KEY,
            BEGIN OF ty_preview_object,
@@ -204,6 +209,10 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS restore_action
       IMPORTING is_file TYPE ty_workbook
       RETURNING VALUE(rv_action) TYPE string.
+    TYPES: BEGIN OF ty_notebook_revision,
+             path TYPE string, revision TYPE i,
+           END OF ty_notebook_revision,
+           ty_notebook_revisions TYPE STANDARD TABLE OF ty_notebook_revision WITH DEFAULT KEY.
     "! Writes the Git version of the given files into BPC (F5): creates or
     "! overwrites them, or deletes those deleted in Git, and records them as
     "! synced. Refuses the whole request, with ev_error, if the branch has moved
@@ -218,6 +227,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_version TYPE string OPTIONAL
                 iv_depth TYPE i DEFAULT 100
                 iv_preview TYPE abap_bool DEFAULT abap_false
+                it_notebook_revisions TYPE ty_notebook_revisions OPTIONAL
       EXPORTING ev_error TYPE string
                 et_results TYPE ty_restore_results
                 es_preview TYPE ty_restore_preview
@@ -265,6 +275,8 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
         generated   TYPE abap_bool,
         content     TYPE xstring,
         member_description TYPE string,
+        notebook_revision TYPE i,
+        notebook_title TYPE string,
       END OF ty_bpc_workbook,
       ty_bpc_workbooks TYPE SORTED TABLE OF ty_bpc_workbook WITH UNIQUE KEY path.
     TYPES ty_states TYPE SORTED TABLE OF zbpc_git_state WITH UNIQUE KEY docname.
@@ -388,6 +400,9 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
     METHODS xml_element
       IMPORTING iv_name TYPE string iv_value TYPE clike
       RETURNING VALUE(rv_xml) TYPE string.
+    METHODS notebook_source IMPORTING io_remote TYPE REF TO zcl_bpc_git_remote
+      iv_path TYPE string it_files TYPE ty_workbooks
+      RETURNING VALUE(rt_files) TYPE zcl_bpc_git_notebook=>ty_wire_files RAISING zcx_abapgit_exception.
     "! BPC transport entity of a restored file, reported under iv_logical.
     METHODS transport_entity
       IMPORTING iv_environment TYPE uj_appset_id io_remote TYPE REF TO zcl_bpc_git_remote
@@ -646,7 +661,8 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         lstmod_time = ls_bpc-lstmod_time
         generated   = ls_bpc-generated
         content     = ls_bpc-content
-        member_description = ls_bpc-member_description ).
+        member_description = ls_bpc-member_description
+        notebook_revision = ls_bpc-notebook_revision notebook_title = ls_bpc-notebook_title ).
       CLEAR ls_state.
       READ TABLE lt_states INTO ls_state WITH TABLE KEY docname = ls_bpc-docname.
       lv_synced = boolc( sy-subrc = 0 ).
@@ -664,11 +680,16 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
 
     DATA(lv_security_allowed) = zcl_bpc_git_security=>can_read( ).
     DATA(lv_members_allowed) = zcl_bpc_git_members=>can_read( ).
+    DATA lv_notebook_allowed TYPE abap_bool.
+    IF iv_kind IS INITIAL OR iv_kind = c_kind-notebook.
+      lv_notebook_allowed = zcl_bpc_git_notebook=>can_read( iv_environment ).
+    ENDIF.
     DATA(lv_bpf_allowed) = zcl_bpc_git_bpf=>can_read( ).
     " Files only in Git; untracked ones (README.md) are not ours
     LOOP AT ls_branch-files INTO ls_git.
       DATA(lv_kind) = get_kind( ls_git-path ).
       IF ( ls_git-path CP 'SECURITY/*' AND lv_security_allowed = abap_false )
+          OR ( lv_kind = c_kind-notebook AND lv_notebook_allowed = abap_false )
           OR ( lv_kind = c_kind-bpf AND lv_bpf_allowed = abap_false )
           OR ( lv_kind = c_kind-dimmember AND lv_members_allowed = abap_false ).
         CONTINUE.
@@ -684,7 +705,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       APPEND VALUE #(
         path    = ls_git-path
         kind    = lv_kind
-        generated = xsdbool( ls_git-path CP 'SECURITY/*' OR lv_kind = c_kind-bpf OR lv_kind = c_kind-dimmember )
+        generated = xsdbool( ls_git-path CP 'SECURITY/*' OR lv_kind = c_kind-bpf OR lv_kind = c_kind-dimmember OR lv_kind = c_kind-notebook )
         model   = get_model( ls_git-path )
         team    = get_team( ls_git-path )
         docname = lv_docname
@@ -725,6 +746,16 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD selected_path.
+    IF get_kind( iv_path ) = c_kind-notebook AND it_paths IS NOT INITIAL.
+      rv_selected = abap_false.
+      LOOP AT it_paths INTO DATA(lv_notebook_selection).
+        IF zcl_bpc_git_notebook=>logical_path( lv_notebook_selection ) = zcl_bpc_git_notebook=>logical_path( iv_path ).
+          rv_selected = abap_true.
+          RETURN.
+        ENDIF.
+      ENDLOOP.
+      RETURN.
+    ENDIF.
     rv_selected = abap_true.
     IF it_paths IS INITIAL OR line_exists( it_paths[ table_line = iv_path ] ).
       RETURN.
@@ -783,6 +814,10 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD history_paths.
+    IF get_kind( iv_path ) = c_kind-notebook.
+      APPEND zcl_bpc_git_notebook=>prefix( iv_path ) TO rt_paths.
+      RETURN.
+    ENDIF.
     APPEND iv_path TO rt_paths.
     DATA(lv_kind) = get_kind( iv_path ).
     DATA(lv_ext) = to_upper( substring_after( val = iv_path sub = '.' occ = -1 ) ).
@@ -816,6 +851,9 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       RAISE EXCEPTION TYPE cx_uj_no_auth.
     ENDIF.
     IF lv_kind = c_kind-bpf AND zcl_bpc_git_bpf=>can_read( ) = abap_false.
+      RAISE EXCEPTION TYPE cx_uj_no_auth.
+    ENDIF.
+    IF lv_kind = c_kind-notebook AND zcl_bpc_git_notebook=>can_read( iv_environment ) = abap_false.
       RAISE EXCEPTION TYPE cx_uj_no_auth.
     ENDIF.
     IF lv_kind = c_kind-dimmember.
@@ -859,18 +897,36 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   METHOD get_diff.
     DATA(lv_kind) = get_kind( iv_path ).
     IF lv_kind <> c_kind-script AND lv_kind <> c_kind-transformation AND lv_kind <> c_kind-conversion
-        AND lv_kind <> c_kind-package AND lv_kind <> c_kind-link.
+        AND lv_kind <> c_kind-package AND lv_kind <> c_kind-link AND lv_kind <> c_kind-notebook.
       zcx_abapgit_exception=>raise( 'Diff is available for logic scripts, transformations, conversions, packages and package links' ).
     ENDIF.
     DATA(lv_model) = get_model( iv_path ).
     DATA(lt_models) = available_models( iv_environment ).
-    IF lv_model IS INITIAL OR NOT line_exists( lt_models[ table_line = CONV uj_appl_id( lv_model ) ] ).
+    IF lv_kind <> c_kind-notebook AND ( lv_model IS INITIAL OR NOT line_exists( lt_models[ table_line = CONV uj_appl_id( lv_model ) ] ) ).
       RAISE EXCEPTION TYPE cx_uj_no_auth.
     ENDIF.
     DATA(lt_bpc) = list_workbooks( iv_environment = iv_environment iv_kind = lv_kind iv_model = lv_model ).
     DATA(lt_paths) = history_paths( iv_path ).
     DATA(ls_config) = get_config( iv_environment ).
-    DATA(ls_branch) = io_remote->read_paths( iv_branch = ls_config-branch it_paths = lt_paths ).
+    DATA ls_branch TYPE zcl_bpc_git_remote=>ty_branch_content.
+    IF lv_kind = c_kind-notebook.
+      CLEAR lt_paths.
+      ls_branch = io_remote->read_branch( iv_branch = ls_config-branch ).
+      LOOP AT ls_branch-files INTO DATA(ls_notebook_git).
+        IF zcl_bpc_git_notebook=>logical_path( ls_notebook_git-path ) = iv_path.
+          APPEND ls_notebook_git-path TO lt_paths.
+        ENDIF.
+      ENDLOOP.
+      LOOP AT lt_bpc INTO DATA(ls_notebook_bpc).
+        IF zcl_bpc_git_notebook=>logical_path( ls_notebook_bpc-path ) = iv_path
+            AND NOT line_exists( lt_paths[ table_line = ls_notebook_bpc-path ] ).
+          APPEND ls_notebook_bpc-path TO lt_paths.
+        ENDIF.
+      ENDLOOP.
+      SORT lt_paths.
+    ELSE.
+      ls_branch = io_remote->read_paths( iv_branch = ls_config-branch it_paths = lt_paths ).
+    ENDIF.
     IF NOT line_exists( lt_bpc[ path = iv_path ] ) AND NOT line_exists( ls_branch-files[ path = iv_path ] ).
       zcx_abapgit_exception=>raise( 'The selected item is no longer listed; reload the overview' ).
     ENDIF.
@@ -899,7 +955,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       ls_part-git_size = xstrlen( lv_git ).
       ls_part-changed = xsdbool( ls_part-in_bpc <> ls_part-in_git OR lv_bpc <> lv_git ).
       DATA(lv_ext) = to_upper( substring_after( val = lv_path sub = '.' occ = -1 ) ).
-      IF lv_ext = 'LGF' OR lv_ext = 'TDM' OR lv_ext = 'CDM' OR lv_kind = c_kind-package OR lv_kind = c_kind-link.
+      IF lv_ext = 'LGF' OR lv_ext = 'TDM' OR lv_ext = 'CDM' OR lv_kind = c_kind-package OR lv_kind = c_kind-link OR lv_kind = c_kind-notebook.
         TRY.
             ls_part-bpc_text = decode_diff_text( lv_bpc ).
             ls_part-git_text = decode_diff_text( lv_git ).
@@ -1085,6 +1141,21 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         RETURN.
       ENDIF.
       DATA(ls_snapshot) = io_remote->read_version( iv_version ).
+      IF get_kind( lv_history_path ) = c_kind-notebook.
+        CLEAR lt_history_paths.
+        LOOP AT ls_snapshot-files INTO DATA(ls_history_notebook).
+          IF zcl_bpc_git_notebook=>logical_path( ls_history_notebook-path ) = lv_history_path.
+            APPEND ls_history_notebook-path TO lt_history_paths.
+          ENDIF.
+        ENDLOOP.
+        LOOP AT lt_head_files INTO DATA(ls_current_notebook).
+          IF zcl_bpc_git_notebook=>logical_path( ls_current_notebook-path ) = lv_history_path
+              AND NOT line_exists( lt_history_paths[ table_line = ls_current_notebook-path ] ).
+            APPEND ls_current_notebook-path TO lt_history_paths.
+          ENDIF.
+        ENDLOOP.
+        SORT lt_history_paths.
+      ENDIF.
       DATA lt_snapshot_files TYPE ty_workbooks.
       DATA lv_operations TYPE i.
       LOOP AT lt_history_paths INTO DATA(lv_snapshot_path).
@@ -1107,7 +1178,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
           ls_snapshot_file-status = c_status-unchanged.
         ENDIF.
         IF lv_snapshot_path CP 'SECURITY/*' OR get_kind( lv_snapshot_path ) = c_kind-bpf
-            OR get_kind( lv_snapshot_path ) = c_kind-dimmember.
+            OR get_kind( lv_snapshot_path ) = c_kind-dimmember OR get_kind( lv_snapshot_path ) = c_kind-notebook.
           ls_snapshot_file-generated = abap_true.
         ENDIF.
         IF ls_snapshot_file-status <> c_status-unchanged.
@@ -1144,6 +1215,33 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         ENDIF.
       ENDLOOP.
     ENDIF.
+    LOOP AT lt_groups INTO DATA(ls_notebook_group) WHERE kind = c_kind-notebook.
+      IF NOT line_exists( lt_paths[ table_line = ls_notebook_group-path ] ).
+        DATA(lv_has_selected_member) = abap_false.
+        LOOP AT ls_notebook_group-members INTO DATA(lv_selected_notebook_member).
+          IF line_exists( lt_paths[ table_line = lv_selected_notebook_member ] ).
+            lv_has_selected_member = abap_true.
+          ENDIF.
+        ENDLOOP.
+        IF lv_has_selected_member = abap_false.
+          CONTINUE.
+        ENDIF.
+      ENDIF.
+      READ TABLE it_notebook_revisions INTO DATA(ls_expected_notebook) WITH KEY path = ls_notebook_group-path.
+      IF ( iv_preview = abap_false AND sy-subrc <> 0 )
+          OR ( sy-subrc = 0 AND ls_expected_notebook-revision <> ls_notebook_group-notebook_revision ).
+        ev_error = 'Notebook revision changed or no expected revision was supplied; reload before restoring'.
+        RETURN.
+      ENDIF.
+      DATA(lt_notebook_source) = notebook_source( io_remote = io_remote
+        iv_path = ls_notebook_group-path it_files = ls_overview-workbooks ).
+      ev_error = zcl_bpc_git_notebook=>apply( iv_environment = iv_environment iv_path = ls_notebook_group-path
+        iv_expected_revision = ls_notebook_group-notebook_revision iv_source_commit = es_preview-source_commit
+        it_files = lt_notebook_source iv_preview = abap_true ).
+      IF ev_error IS NOT INITIAL.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
     IF iv_preview = abap_true.
       es_preview-can_restore = abap_true.
       LOOP AT it_paths INTO DATA(lv_preview_path).
@@ -1157,7 +1255,8 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
           READ TABLE ls_overview-workbooks INTO DATA(ls_preview_source) WITH KEY path = lv_preview_member.
           DATA(ls_preview_file) = VALUE ty_preview_file( path = lv_preview_member
             status = ls_preview_source-status action = restore_action( ls_preview_source )
-            in_bpc = ls_preview_source-in_bpc source_sha1 = ls_preview_source-git_sha1 ).
+            in_bpc = ls_preview_source-in_bpc source_sha1 = ls_preview_source-git_sha1
+            current_notebook_revision = ls_preview_group-notebook_revision ).
           READ TABLE lt_head_files INTO DATA(ls_preview_current) WITH KEY path = lv_preview_member.
           IF sy-subrc = 0.
             ls_preview_file-current_status = ls_preview_current-status.
@@ -1211,14 +1310,24 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
               ENDIF.
             ENDIF.
           ENDLOOP.
+          DATA lv_notebook_revision TYPE i.
+          CLEAR lv_notebook_revision.
+          IF lv_message IS INITIAL AND ls_group-kind = c_kind-notebook.
+            lt_notebook_source = notebook_source( io_remote = io_remote iv_path = lv_logical it_files = ls_overview-workbooks ).
+            lv_message = zcl_bpc_git_notebook=>apply( EXPORTING iv_environment = iv_environment iv_path = lv_logical
+              iv_expected_revision = ls_group-notebook_revision iv_source_commit = es_preview-source_commit
+              it_files = lt_notebook_source IMPORTING ev_revision = lv_notebook_revision ).
+          ENDIF.
           IF lv_message IS INITIAL.
             LOOP AT ls_group-members INTO lv_member.
               READ TABLE ls_overview-workbooks INTO ls_file WITH KEY path = lv_member.
               IF ls_file-status = c_status-unchanged.
                 CONTINUE.
               ENDIF.
-              lv_message = restore_file( io_files = lo_files io_remote = io_remote
-                                         iv_environment = iv_environment is_file = ls_file ).
+              IF ls_group-kind <> c_kind-notebook.
+                lv_message = restore_file( io_files = lo_files io_remote = io_remote
+                                           iv_environment = iv_environment is_file = ls_file ).
+              ENDIF.
               IF lv_message IS NOT INITIAL.
                 lv_message = |{ lv_member }: { lv_message }|.
                 EXIT.
@@ -1279,7 +1388,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         " Workbook, definition, and sync records succeed or roll back together.
         ROLLBACK WORK.
       ENDIF.
-      APPEND VALUE #( path = lv_logical ok = xsdbool( lv_message IS INITIAL ) message = lv_message ) TO et_results.
+      APPEND VALUE #( path = lv_logical ok = xsdbool( lv_message IS INITIAL ) message = lv_message notebook_revision = lv_notebook_revision ) TO et_results.
     ENDLOOP.
     " Activate only after all requested member saves have finished.
     DATA lt_dimensions TYPE SORTED TABLE OF uj_dim_name WITH UNIQUE KEY table_line.
@@ -1367,7 +1476,21 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
 
+  METHOD notebook_source.
+    LOOP AT it_files INTO DATA(ls_file).
+      IF zcl_bpc_git_notebook=>logical_path( ls_file-path ) = iv_path AND ls_file-git_sha1 IS NOT INITIAL.
+        APPEND VALUE #( path = ls_file-path content_base64 = cl_http_utility=>encode_x_base64(
+          io_remote->get_content( ls_file-path ) ) ) TO rt_files.
+      ENDIF.
+    ENDLOOP.
+    SORT rt_files BY path.
+  ENDMETHOD.
+
   METHOD transport_entity.
+    IF is_file-kind = c_kind-notebook.
+      rs_entity = VALUE #( path = iv_logical note = 'Notebook versioning does not support transport recording' ).
+      RETURN.
+    ENDIF.
     IF is_file-status = c_status-deleted_git.
       rs_entity = VALUE #( path = iv_logical
         note = 'Deletions are not added to transport requests; delete the object in the target system' ).
@@ -1634,6 +1757,22 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     IF iv_kind = c_kind-dimmember.
       RETURN.
     ENDIF.
+    IF iv_kind IS INITIAL OR iv_kind = c_kind-notebook.
+      IF zcl_bpc_git_notebook=>can_read( iv_environment ) = abap_true.
+        DATA(lt_notebooks) = zcl_bpc_git_notebook=>list( iv_environment = iv_environment ).
+        LOOP AT lt_notebooks INTO DATA(ls_notebook).
+          INSERT VALUE #( path = ls_notebook-path kind = c_kind-notebook model = ls_notebook-model
+            docname = to_docname( iv_environment = iv_environment iv_path = ls_notebook-path )
+            generated = abap_true content = ls_notebook-content size = xstrlen( ls_notebook-content )
+            notebook_revision = ls_notebook-revision notebook_title = ls_notebook-title ) INTO TABLE rt_workbooks.
+        ENDLOOP.
+      ELSEIF iv_kind = c_kind-notebook.
+        zcx_abapgit_exception=>raise( 'Notebook Git provider is unavailable or not authorized for this environment' ).
+      ENDIF.
+    ENDIF.
+    IF iv_kind = c_kind-notebook.
+      RETURN.
+    ENDIF.
     DATA(lv_security_scope) = xsdbool( iv_kind = c_kind-team OR iv_kind = c_kind-taskprofile
       OR iv_kind = c_kind-dataprofile ).
     IF lv_security_scope = abap_true AND iv_model IS NOT INITIAL.
@@ -1759,6 +1898,10 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
 
   METHOD logical_path.
     rv_path = iv_path.
+    IF get_kind( iv_path ) = c_kind-notebook.
+      rv_path = zcl_bpc_git_notebook=>logical_path( iv_path ).
+      RETURN.
+    ENDIF.
     DATA(lv_kind) = get_kind( iv_path ).
     IF lv_kind <> c_kind-transformation AND lv_kind <> c_kind-conversion.
       RETURN.
@@ -1784,6 +1927,9 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       READ TABLE rt_files ASSIGNING FIELD-SYMBOL(<ls_group>) WITH KEY path = lv_path.
       IF sy-subrc <> 0.
         READ TABLE it_files INTO DATA(ls_primary) WITH KEY path = lv_path.
+        IF sy-subrc <> 0.
+          ls_primary = VALUE #( path = lv_path kind = ls_file-kind model = ls_file-model ).
+        ENDIF.
         APPEND ls_primary TO rt_files ASSIGNING <ls_group>.
         CLEAR <ls_group>-members.
       ENDIF.
@@ -1862,6 +2008,10 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_kind.
+    rv_kind = zcl_bpc_git_notebook=>get_kind( iv_path ).
+    IF rv_kind IS NOT INITIAL.
+      RETURN.
+    ENDIF.
     rv_kind = zcl_bpc_git_members=>get_kind( iv_path ).
     IF rv_kind IS NOT INITIAL.
       RETURN.
@@ -2253,7 +2403,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD get_model.
-    IF iv_path CP 'SECURITY/*' OR get_kind( iv_path ) = c_kind-dimmember.
+    IF iv_path CP 'SECURITY/*' OR get_kind( iv_path ) = c_kind-dimmember OR get_kind( iv_path ) = c_kind-notebook.
       RETURN.
     ENDIF.
     rv_model = COND #( WHEN get_kind( iv_path ) = c_kind-script

@@ -4,7 +4,7 @@ Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
 package links, security definitions, BPF template designs and dimension members.
 The app is a UI5 BSP application, installed with abapGit into package `ZBPC_GIT`.
-Current version: **0.19.6**. Target runtime: ABAP 7.52 and UI5 1.52.
+Current version: **0.20.0 (Notebook test branch)**. Target runtime: ABAP 7.52 and UI5 1.52.
 
 Choose an object type and optional model, then **Load**. Select objects to
 commit, restore or inspect their history. EPM reports and input schedules have
@@ -475,3 +475,6 @@ Full Git snapshots are now cached in volatile SAP shared memory per repository, 
 
 The read-only restore-preview API supports MCP integration with companion plans,
 current BPC fingerprints and stale-head validation. See [API contract](docs/RESTORE_PREVIEW_API.md).
+
+Notebook versioning is prepared on `codex/notebook-versioning` with a matching
+Notebook provider branch. See [the test-branch contract and release gate](docs/NOTEBOOK_VERSIONING.md).

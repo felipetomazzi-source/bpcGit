@@ -315,3 +315,39 @@ CLASS ltcl_snapshot_cache IMPLEMENTATION.
     DELETE FROM SHARED BUFFER indx(bf) ID key.
   ENDMETHOD.
 ENDCLASS.
+
+CLASS ltcl_notebook_history DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
+  PRIVATE SECTION.
+    METHODS directory_changes FOR TESTING RAISING zcx_abapgit_exception.
+ENDCLASS.
+CLASS ltcl_notebook_history IMPLEMENTATION.
+  METHOD directory_changes.
+    DATA(remote) = NEW zcl_bpc_git_remote( iv_url = 'https://example.invalid/notebook-test.git' ).
+    DATA(root) = repeat( val = 'a' occ = 40 ).
+    DATA(folder) = repeat( val = 'b' occ = 40 ).
+    DATA(first) = repeat( val = 'c' occ = 40 ).
+    DATA(second) = repeat( val = 'd' occ = 40 ).
+    DATA objects TYPE zif_abapgit_definitions=>ty_objects_tt.
+    objects = VALUE #( ( sha1 = root type = zif_abapgit_git_definitions=>c_type-tree
+      data = zcl_abapgit_git_pack=>encode_tree( VALUE #( ( name = 'NOTEBOOKS'
+        chmod = zif_abapgit_git_definitions=>c_chmod-dir sha1 = folder ) ) ) )
+      ( sha1 = folder type = zif_abapgit_git_definitions=>c_type-tree
+      data = zcl_abapgit_git_pack=>encode_tree( VALUE #( ( name = 'revenue'
+        chmod = zif_abapgit_git_definitions=>c_chmod-dir sha1 = first ) ) ) ) ).
+    remote->tree_signature( EXPORTING it_objects = objects iv_tree = root
+      it_paths = VALUE #( ( `NOTEBOOKS/revenue/` ) )
+      IMPORTING ev_signature = DATA(before) ev_present = DATA(present) ev_complete = DATA(complete) ).
+    cl_abap_unit_assert=>assert_true( present ).
+    cl_abap_unit_assert=>assert_true( complete ).
+    READ TABLE objects ASSIGNING FIELD-SYMBOL(<folder>) WITH KEY type COMPONENTS
+      type = zif_abapgit_git_definitions=>c_type-tree sha1 = folder.
+    <folder>-data = zcl_abapgit_git_pack=>encode_tree( VALUE #( ( name = 'revenue'
+      chmod = zif_abapgit_git_definitions=>c_chmod-dir sha1 = second ) ) ).
+    remote->tree_signature( EXPORTING it_objects = objects iv_tree = root
+      it_paths = VALUE #( ( `NOTEBOOKS/revenue/` ) ) IMPORTING ev_signature = DATA(after) ).
+    cl_abap_unit_assert=>assert_differs( act = after exp = before ).
+    remote->tree_signature( EXPORTING it_objects = objects iv_tree = root
+      it_paths = VALUE #( ( `NOTEBOOKS/missing/` ) ) IMPORTING ev_present = present ).
+    cl_abap_unit_assert=>assert_false( present ).
+  ENDMETHOD.
+ENDCLASS.

@@ -446,7 +446,7 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       RETURN.
     ENDIF.
     IF lv_kind IS NOT INITIAL AND lv_kind <> 'WORKBOOK' AND lv_kind <> 'SCRIPT'
-        AND lv_kind <> 'DIMMEMBER' AND lv_kind <> 'BPF' AND lv_kind <> 'TEAM' AND lv_kind <> 'TASKPROFILE' AND lv_kind <> 'DATAPROFILE'
+        AND lv_kind <> 'NOTEBOOK' AND lv_kind <> 'DIMMEMBER' AND lv_kind <> 'BPF' AND lv_kind <> 'TEAM' AND lv_kind <> 'TASKPROFILE' AND lv_kind <> 'DATAPROFILE'
         AND lv_kind <> 'REPORT' AND lv_kind <> 'SCHEDULE' AND lv_kind <> 'OTHER'
         AND lv_kind <> 'TRANSFORMATION' AND lv_kind <> 'CONVERSION' AND lv_kind <> 'PACKAGE' AND lv_kind <> 'LINK'.
       respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'Choose a supported object type' ).
@@ -456,6 +456,10 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
         OR ( lv_kind = 'DIMMEMBER' AND lv_model IS NOT INITIAL ).
       respond_error( iv_code = 400 iv_reason = 'Bad Request'
         iv_message = 'Dimension members apply to the environment; select a dimension and leave model empty' ).
+      RETURN.
+    ENDIF.
+    IF lv_kind = 'NOTEBOOK' AND lv_model IS NOT INITIAL.
+      respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'Notebooks use the selected environment; leave model empty' ).
       RETURN.
     ENDIF.
     IF ( lv_kind = 'TEAM' OR lv_kind = 'TASKPROFILE' OR lv_kind = 'DATAPROFILE' ) AND lv_model IS NOT INITIAL.
@@ -495,6 +499,8 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
         `{"path":` && quote( ls_workbook-path ) &&
         `,"kind":` && quote( ls_workbook-kind ) &&
         `,"memberDescription":` && quote( ls_workbook-member_description ) &&
+        `,"notebookTitle":` && quote( ls_workbook-notebook_title ) &&
+        `,"notebookRevision":` && |{ ls_workbook-notebook_revision }| &&
         `,"model":` && quote( ls_workbook-model ) &&
         `,"team":` && quote( ls_workbook-team ) &&
         `,"status":` && quote( ls_workbook-status ) &&
@@ -600,6 +606,27 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     DATA lt_entities TYPE zcl_bpc_git_transport=>ty_entities.
     DATA lv_request TYPE trkorr.
     DATA ls_preview TYPE zcl_bpc_git_service=>ty_restore_preview.
+    DATA lt_notebook_revisions TYPE zcl_bpc_git_service=>ty_notebook_revisions.
+    DATA(lv_notebook_revisions) = read_field( iv_name = 'notebookRevisions' iv_label = 'Notebook expected revisions'
+      iv_max_length = 262144 iv_required = abap_false ).
+    IF lv_notebook_revisions IS NOT INITIAL.
+      TRY.
+          /ui2/cl_json=>deserialize( EXPORTING json = lv_notebook_revisions
+            CHANGING data = lt_notebook_revisions ).
+          LOOP AT lt_notebook_revisions INTO DATA(ls_notebook_expected).
+            IF zcl_bpc_git_notebook=>logical_path( ls_notebook_expected-path ) <> ls_notebook_expected-path
+                OR ls_notebook_expected-path IS INITIAL OR ls_notebook_expected-revision < 0.
+              mv_invalid = abap_true.
+            ENDIF.
+          ENDLOOP.
+        CATCH cx_root.
+          mv_invalid = abap_true.
+      ENDTRY.
+      IF mv_invalid = abap_true.
+        respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'Invalid Notebook expected revisions' ).
+        RETURN.
+      ENDIF.
+    ENDIF.
 
     DATA(lv_expected) = read_field( iv_name = 'commit' iv_label = 'current commit'
                                     iv_max_length = 40 iv_required = iv_preview ).
@@ -628,6 +655,14 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     IF lt_paths IS INITIAL.
       RETURN.
     ENDIF.
+    IF lv_request IS NOT INITIAL.
+      LOOP AT lt_paths INTO DATA(lv_transport_path).
+        IF zcl_bpc_git_notebook=>get_kind( lv_transport_path ) IS NOT INITIAL.
+          respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'Notebook transport recording is not supported' ).
+          RETURN.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
     " Refuse before changing BPC if the chosen request cannot take the objects.
     IF lv_request IS NOT INITIAL.
       DATA(lv_request_error) = zcl_bpc_git_transport=>check_request( lv_request ).
@@ -651,6 +686,7 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
                                              iv_version = lv_version
                                              iv_depth = lv_depth
                                              iv_preview = iv_preview
+                                             it_notebook_revisions = lt_notebook_revisions
                                    IMPORTING ev_error = lv_error
                                              et_results = lt_results
                                              et_entities = lt_entities
@@ -674,6 +710,7 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
             `,"overwritesBpc":` && COND string( WHEN ls_file-overwrites_bpc = abap_true THEN `true` ELSE `false` ) &&
             `,"sourceSha1":` && quote( ls_file-source_sha1 ) &&
             `,"currentBpcSha1":` && quote( ls_file-current_bpc_sha1 ) &&
+            `,"currentNotebookRevision":` && |{ ls_file-current_notebook_revision }| &&
             `,"validationError":` && quote( ls_file-validation_error ) && `}`.
           lv_file_separator = ','.
         ENDLOOP.
@@ -698,7 +735,8 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       lv_json = lv_json && lv_separator &&
         `{"path":` && quote( ls_result-path ) &&
         `,"ok":` && COND string( WHEN ls_result-ok = abap_true THEN `true` ELSE `false` ) &&
-        `,"message":` && quote( ls_result-message ) && `}`.
+        `,"message":` && quote( ls_result-message ) &&
+        `,"notebookRevision":` && |{ ls_result-notebook_revision }| && `}`.
       lv_separator = ','.
     ENDLOOP.
     respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"branch":` && quote( ls_preview-branch ) &&
@@ -756,6 +794,12 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       respond_error( iv_code = 409 iv_reason = 'Conflict' iv_message = lv_error ).
       RETURN.
     ENDIF.
+    LOOP AT lt_paths INTO DATA(lv_notebook_transport_path).
+      IF zcl_bpc_git_notebook=>get_kind( lv_notebook_transport_path ) IS NOT INITIAL.
+        respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'Notebook transport recording is not supported' ).
+        RETURN.
+      ENDIF.
+    ENDLOOP.
     DATA(lt_entities) = io_service->transport_entities( iv_environment = lv_environment it_paths = lt_paths ).
     DATA lt_results TYPE zcl_bpc_git_service=>ty_restore_results.
     LOOP AT lt_paths INTO DATA(lv_path).

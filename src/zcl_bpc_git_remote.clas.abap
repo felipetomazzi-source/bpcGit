@@ -556,6 +556,10 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
     CLEAR: ev_signature, ev_present, ev_complete.
     DATA lv_count TYPE i.
     LOOP AT it_paths INTO DATA(lv_path).
+      DATA(lv_directory) = xsdbool( lv_path CP 'NOTEBOOKS/*/' OR lv_path CP '*/NOTEBOOKS/*/' ).
+      IF lv_directory = abap_true.
+        lv_path = substring( val = lv_path len = strlen( lv_path ) - 1 ).
+      ENDIF.
       DATA(lv_tree) = iv_tree.
       DATA lt_parts TYPE string_table.
       SPLIT lv_path AT '/' INTO TABLE lt_parts.
@@ -576,7 +580,8 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
         ENDIF.
         IF lv_index = lines( lt_parts ).
           IF ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-file
-              OR ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-executable.
+              OR ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-executable
+              OR ( lv_directory = abap_true AND ls_node-chmod = zif_abapgit_git_definitions=>c_chmod-dir ).
             lv_blob = to_lower( ls_node-sha1 ).
           ENDIF.
         ELSEIF ls_node-chmod <> zif_abapgit_git_definitions=>c_chmod-dir.
@@ -595,7 +600,11 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
 
   METHOD history.
     DATA lt_repository_paths TYPE string_table.
+    DATA lv_directory_history TYPE abap_bool.
     LOOP AT it_paths INTO DATA(lv_logical_path).
+      IF lv_logical_path CP 'NOTEBOOKS/*/'.
+        lv_directory_history = abap_true.
+      ENDIF.
       APPEND repository_path( lv_logical_path ) TO lt_repository_paths.
     ENDLOOP.
     IF iv_depth < 1 OR iv_depth > 1000.
@@ -620,7 +629,7 @@ CLASS zcl_bpc_git_remote IMPLEMENTATION.
       CATCH cx_sy_import_mismatch_error.
     ENDTRY.
     CLEAR rs_history.
-    IF mv_bitbucket_api IS NOT INITIAL.
+    IF mv_bitbucket_api IS NOT INITIAL AND lv_directory_history = abap_false.
       rs_history = bitbucket_history( iv_head = to_lower( ls_branch-sha1 ) it_paths = lt_repository_paths iv_depth = iv_depth ).
       EXPORT history = rs_history TO SHARED BUFFER indx(bh) ID lv_cache_key.
       RETURN.

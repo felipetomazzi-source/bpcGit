@@ -65,6 +65,14 @@ http.createServer(async (req, res) => {
       req.on('data', chunk => { body += chunk; });
       req.on('end', () => {
         const params = new URLSearchParams(body);
+        if (params.get('kind') === 'NOTEBOOK' && !params.get('model')) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ branch: 'main', branchFound: true, commit: 'a'.repeat(40), workbooks: [
+            { path: 'NOTEBOOKS/revenue/notebook.json', kind: 'NOTEBOOK', model: 'PLAN',
+              status: 'MODIFIED_GIT', inBpc: true, generated: true, notebookTitle: 'Revenue calculation', notebookRevision: 3 }
+          ] }));
+          return;
+        }
         if (params.get('kind') !== 'DIMMEMBER' || params.get('dimension') !== 'ACCOUNT' || params.get('model')) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: { message: 'Unexpected member load scope' } }));

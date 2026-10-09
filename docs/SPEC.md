@@ -1081,3 +1081,15 @@ into SAP using ADT abapGit repo `000000000006`, main, transport `NPLK900106`.
 Both backend classes pass ADT syntax checks (service has documentation warnings).
 All four new harmless service ABAP Unit tests pass in SAP. No BPC data restore,
 commit, transport recording, or live browser test was performed.
+
+## Notebook versioning test branch (0.20.0)
+
+Prepared on `codex/notebook-versioning`, not merged or deployed. Adds Notebook
+saved-definition export/commit, whole-bundle grouping, per-file text diffs,
+directory history, validated immutable ABAP imports with saved-revision CAS,
+and explicit transport exclusion. Optional dynamic Notebook provider preserves
+backend/repository independence. Script export/versioning/diff is supported;
+Script import is blocked pending a supported server transpiler. Runtime choices
+stay local, and existing history/runs/handlers remain pinned.
+See [Notebook versioning](NOTEBOOK_VERSIONING.md) for the provider and HTTP
+contracts, matching Notebook branch, test commands, limitations and release gate.

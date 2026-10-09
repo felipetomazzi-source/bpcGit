@@ -2,3 +2,6 @@
 __pycache__/
 node_modules/
 .playwright-cli/
+
+# Read-only ABAP lint dependency metadata
+.abaplint-deps/

@@ -1,0 +1,30 @@
+{
+  "global": {
+    "files": "/../src/**/*.*",
+    "exclude": []
+  },
+  "dependencies": [
+    {
+      "url": "https://github.com/abaplint/deps",
+      "folder": "/../.abaplint-deps",
+      "files": "/src/**/*.*"
+    }
+  ],
+  "syntax": {
+    "version": {
+      "release": "v752",
+      "language": "Normal"
+    },
+    "errorNamespace": "^(ZCL_BPC_GIT|ZBPC_GIT)",
+    "globalConstants": [
+      "uje0_cs_task_id",
+      "ujb0_cs_tmpl_status",
+      "uj00_cs_action",
+      "uje0_cs_profile_class"
+    ]
+  },
+  "rules": {
+    "parser_error": true,
+    "check_syntax": true
+  }
+}

@@ -3,6 +3,7 @@ CLASS ltcl_restore_preview DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVE
     METHODS actions FOR TESTING.
     METHODS preview_is_read_only FOR TESTING RAISING cx_static_check.
     METHODS companion_plan FOR TESTING RAISING cx_static_check.
+    METHODS stale_notebook FOR TESTING RAISING cx_static_check.
     METHODS stale_head FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
@@ -72,6 +73,27 @@ CLASS ltcl_restore_preview IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = files[ 2 ]-overwrites_bpc exp = abap_true ).
     cl_abap_unit_assert=>assert_equals( act = files[ 1 ]-current_bpc_sha1
       exp = zcl_bpc_git_remote=>blob_sha1( CONV xstring( '0102' ) ) ).
+  ENDMETHOD.
+
+  METHOD stale_notebook.
+    TEST-INJECTION restore_overview.
+      ls_config-branch = 'main'.
+      ls_overview = VALUE #( branch_found = abap_true commit = repeat( val = 'a' occ = 40 )
+        workbooks = VALUE #( ( path = 'NOTEBOOKS/revenue/notebook.json' kind = 'NOTEBOOK'
+          generated = abap_true in_bpc = abap_true status = 'MODIFIED_GIT' notebook_revision = 3 ) ) ).
+    END-TEST-INJECTION.
+    TEST-INJECTION restore_file_service.
+      CLEAR lo_files.
+    END-TEST-INJECTION.
+    DATA(service) = NEW zcl_bpc_git_service( ).
+    DATA remote TYPE REF TO zcl_bpc_git_remote.
+    service->restore_files( EXPORTING iv_environment = 'TEST' io_remote = remote
+      it_paths = VALUE #( ( `NOTEBOOKS/revenue/notebook.json` ) )
+      iv_expected_commit = repeat( val = 'a' occ = 40 )
+      it_notebook_revisions = VALUE #( ( path = 'NOTEBOOKS/revenue/notebook.json' revision = 2 ) )
+      IMPORTING ev_error = DATA(error) et_results = DATA(results) ).
+    cl_abap_unit_assert=>assert_not_initial( error ).
+    cl_abap_unit_assert=>assert_initial( results ).
   ENDMETHOD.
 
   METHOD stale_head.

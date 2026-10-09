@@ -181,6 +181,47 @@ sap.ui.getCore().attachInit(function () {
         done();
       }, function (error) { assert.ok(false, String(error)); done(); });
     });
+    QUnit.test('Notebook versioning and transport isolation', function (assert) {
+      var done = assert.async();
+      var component = sap.ui.component({ name: 'bpc.git', url: '/app/', settings: { embedded: true, environment: 'TEST' } });
+      var container = new ComponentContainer({ component: component, height: '100%' });
+      container.placeAt('qunit-fixture');
+      var attempts = 0;
+      function finish() { container.destroy(); component.destroy(); done(); }
+      function ready() {
+        var model = component.getModel('app');
+        if (!model.getProperty('/configured')) {
+          if (++attempts > 100) { assert.ok(false, 'Notebook test setup timed out'); finish(); return; }
+          setTimeout(ready, 50); return;
+        }
+        var view = component.getRootControl();
+        var controller = view.getController();
+        assert.ok(view.byId('loadType').getItems().some(function (item) { return item.getKey() === 'NOTEBOOK'; }), 'Notebook load option exists on UI5 1.52');
+        model.setProperty('/loadScope', { kind: 'NOTEBOOK', model: 'ALL', dimension: 'ALL' });
+        controller._loadWorkbooks(true);
+        attempts = 0;
+        function loaded() {
+          if (model.getProperty('/workbooksBusy')) {
+            if (++attempts > 100) { assert.ok(false, 'Notebook load timed out'); finish(); return; }
+            setTimeout(loaded, 50); return;
+          }
+          var row = model.getProperty('/workbooks')[0];
+          assert.strictEqual(row.name, 'Revenue calculation', 'Saved Notebook title shown');
+          assert.strictEqual(row.notebookRevision, 3, 'Saved revision retained for restore concurrency');
+          row.selected = true; controller._updateSelection();
+          assert.strictEqual(model.getProperty('/selectedTransport'), 0, 'Notebook cannot be added to transport');
+          assert.strictEqual(model.getProperty('/selectedDiff'), true, 'Notebook can show source diffs');
+          controller._openRestoreDialog([row]); sap.ui.getCore().applyChanges();
+          var dialog = view.getDependents().filter(function (control) { return control.getTitle && /^Restore/.test(control.getTitle()); }).pop();
+          assert.ok(dialog.getContent()[0].getItems().some(function (control) {
+            return control.getText && /Transport recording is not supported/.test(control.getText());
+          }), 'Restore states that transport recording is unavailable');
+          dialog.close(); finish();
+        }
+        loaded();
+      }
+      ready();
+    });
     QUnit.start();
   });
 });
