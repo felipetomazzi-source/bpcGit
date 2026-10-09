@@ -1103,6 +1103,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
           CLEAR ls_snapshot_file-git_sha1.
           ls_snapshot_file-status = c_status-deleted_git.
         ELSE.
+          CLEAR ls_snapshot_file-git_sha1.
           ls_snapshot_file-status = c_status-unchanged.
         ENDIF.
         IF lv_snapshot_path CP 'SECURITY/*' OR get_kind( lv_snapshot_path ) = c_kind-bpf
