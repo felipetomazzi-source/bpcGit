@@ -53,9 +53,9 @@ http.createServer(async (req, res) => {
         const valid = params.get('commit') === head;
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ branch: 'main', currentHead: head, sourceCommit: params.get('version') || head,
-          canRestore: valid, validationError: valid ? '' : 'Branch has new commits', objects: valid ? [{ path: 'PLAN/EXCEL/REPORTS/REPORT.XLSX', files: [
-            { path: 'PLAN/EXCEL/REPORTS/REPORT.XLSX', currentStatus: 'MODIFIED_BPC', status: 'MODIFIED_GIT', action: 'UPDATE', inBpc: true, overwritesBpc: true, sourceSha1: 'b'.repeat(40), currentBpcSha1: 'c'.repeat(40), validationError: '' },
-            { path: 'PLAN/EXCEL/REPORTS/REPORT.TDM', currentStatus: 'DELETED_GIT', status: 'DELETED_GIT', action: 'DELETE', inBpc: true, overwritesBpc: true, sourceSha1: '', currentBpcSha1: 'd'.repeat(40), validationError: '' }
+          canRestore: valid, validationError: valid ? '' : 'Branch has new commits', objects: valid ? [{ path: 'PLAN/DATAMANAGER/TRANSFORMATIONFILES/IMPORT.XLSX', files: [
+            { path: 'PLAN/DATAMANAGER/TRANSFORMATIONFILES/IMPORT.XLSX', currentStatus: 'MODIFIED_BPC', status: 'MODIFIED_GIT', action: 'UPDATE', inBpc: true, overwritesBpc: true, sourceSha1: 'b'.repeat(40), currentBpcSha1: 'c'.repeat(40), validationError: '' },
+            { path: 'PLAN/DATAMANAGER/TRANSFORMATIONFILES/IMPORT.TDM', currentStatus: 'DELETED_GIT', status: 'DELETED_GIT', action: 'DELETE', inBpc: true, overwritesBpc: true, sourceSha1: '', currentBpcSha1: 'd'.repeat(40), validationError: '' }
           ] }] : [] }));
       });
       return;

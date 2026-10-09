@@ -2,6 +2,7 @@ CLASS ltcl_restore_preview DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVE
   PRIVATE SECTION.
     METHODS actions FOR TESTING.
     METHODS preview_is_read_only FOR TESTING RAISING cx_static_check.
+    METHODS companion_plan FOR TESTING RAISING cx_static_check.
     METHODS stale_head FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
@@ -39,6 +40,38 @@ CLASS ltcl_restore_preview IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = preview-objects[ 1 ]-files[ 1 ]-action exp = 'CREATE' ).
     cl_abap_unit_assert=>assert_initial( results ).
     cl_abap_unit_assert=>assert_initial( entities ).
+  ENDMETHOD.
+
+  METHOD companion_plan.
+    TEST-INJECTION restore_overview.
+      ls_config-branch = 'main'.
+      ls_overview = VALUE #( branch_found = abap_true commit = repeat( val = 'a' occ = 40 )
+        workbooks = VALUE #(
+          ( path = 'PLAN/DATAMANAGER/TRANSFORMATIONFILES/IMPORT.XLSX' kind = 'TRANSFORMATION'
+            generated = abap_true in_bpc = abap_true content = '0102' status = 'MODIFIED_GIT' )
+          ( path = 'PLAN/DATAMANAGER/TRANSFORMATIONFILES/IMPORT.TDM' kind = 'TRANSFORMATION'
+            generated = abap_true in_bpc = abap_true content = '0304' status = 'DELETED_GIT' ) ) ).
+    END-TEST-INJECTION.
+    TEST-INJECTION restore_file_service.
+      CLEAR lo_files.
+    END-TEST-INJECTION.
+    DATA(service) = NEW zcl_bpc_git_service( ).
+    DATA remote TYPE REF TO zcl_bpc_git_remote.
+    service->restore_files( EXPORTING iv_environment = 'TEST' io_remote = remote
+      it_paths = VALUE #( ( `PLAN/DATAMANAGER/TRANSFORMATIONFILES/IMPORT.XLSX` )
+        ( `PLAN/DATAMANAGER/TRANSFORMATIONFILES/IMPORT.TDM` ) )
+      iv_expected_commit = repeat( val = 'a' occ = 40 ) iv_preview = abap_true
+      IMPORTING es_preview = DATA(preview) ev_error = DATA(error) ).
+    cl_abap_unit_assert=>assert_initial( error ).
+    cl_abap_unit_assert=>assert_equals( act = preview-can_restore exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals( act = lines( preview-objects ) exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = lines( preview-objects[ 1 ]-files ) exp = 2 ).
+    DATA(files) = preview-objects[ 1 ]-files.
+    cl_abap_unit_assert=>assert_equals( act = files[ 1 ]-action exp = 'UPDATE' ).
+    cl_abap_unit_assert=>assert_equals( act = files[ 2 ]-action exp = 'DELETE' ).
+    cl_abap_unit_assert=>assert_equals( act = files[ 2 ]-overwrites_bpc exp = abap_true ).
+    cl_abap_unit_assert=>assert_equals( act = files[ 1 ]-current_bpc_sha1
+      exp = zcl_bpc_git_remote=>blob_sha1( CONV xstring( '0102' ) ) ).
   ENDMETHOD.
 
   METHOD stale_head.

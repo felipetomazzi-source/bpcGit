@@ -973,6 +973,8 @@ commit success responses add service-confirmed logical outcomes and branch.
 See [the complete contract](RESTORE_PREVIEW_API.md) for fields, error handling,
 MCP preview-ID binding/recheck, and concurrency/validation limits.
 Coordinated with BPC MCP agent in chat `01a11e0d-8757-7a82-afe5-83d75874caea`.
-Local Node and UI5 tests pass; service ADT syntax check has only documentation
-warnings. HTTP syntax initially awaits the installed service's new public type.
-ABAP Unit execution and full backend validation require installation in SAP.
+Local Node tests (13) and UI5 suites (8 + 41 assertions) pass. Code was pulled
+into SAP using ADT abapGit repo `000000000006`, main, transport `NPLK900106`.
+Both backend classes pass ADT syntax checks (service has documentation warnings).
+All four new harmless service ABAP Unit tests pass in SAP. No BPC data restore,
+commit, transport recording, or live browser test was performed.

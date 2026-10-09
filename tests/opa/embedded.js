@@ -166,7 +166,7 @@ sap.ui.getCore().attachInit(function () {
       function preview(head) {
         return jQuery.ajax({ url: '/sap/bc/zbpc_git/restore-preview', type: 'POST', dataType: 'json',
           headers: { 'X-Requested-With': 'XMLHttpRequest' },
-          data: { environment: 'TEST', commit: head, paths: 'PLAN/EXCEL/REPORTS/REPORT.XLSX' } });
+          data: { environment: 'TEST', commit: head, paths: 'PLAN/DATAMANAGER/TRANSFORMATIONFILES/IMPORT.XLSX' } });
       }
       preview('a'.repeat(40)).then(function (plan) {
         assert.strictEqual(plan.canRestore, true, 'Valid plan can be reviewed');

@@ -92,5 +92,5 @@ Existing response members remain unchanged.
 The local UI5 harness exercises a read-only mock response, companion overwrite/
 delete information, fingerprints and stale heads. Service ABAP Unit tests cover
 action mapping, preview returning without restore results/transport entities,
-and stale-head refusal through test seams. Run those ABAP tests after installation;
-the local mock does not execute the ABAP backend.
+and stale-head refusal through test seams. All four ABAP tests passed after abapGit installation in SAP; the local mock
+does not execute the ABAP backend.
