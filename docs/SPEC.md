@@ -1065,3 +1065,17 @@ SAP progress or proof of performance improvement.
 ## Verified full snapshot cache (0.19.5)
 
 Full read_branch requests first authenticate/check the branch advertisement. Only an exact advertised head match permits volatile snapshot reuse in INDX(bf). Keys include SAP client/user, Git username, clean repository URL, root and branch. Snapshots contain decoded objects and complete repository files, capped at 64 MiB combined uncompressed payload; credentials are excluded. Missing/mismatched/evicted snapshots fall back to the original abapGit pull. Push publication stores new_objects/new_files returned by abapGit under the new head. Existing expected-head and receive-pack concurrency guards remain. Cache writes are best-effort. This supersedes earlier descriptions of unconditional fresh full pulls.
+
+## Restore preview API (0.19.6)
+
+Implemented POST `/restore-preview` using the same service planning path as restore.
+It returns logical objects and companion files, create/update/delete/unchanged
+operations, overwrite flags, current BPC fingerprints and validation errors,
+without saving BPC or sync state. Restore responses add branch/head/source metadata;
+commit success responses add service-confirmed logical outcomes and branch.
+See [the complete contract](RESTORE_PREVIEW_API.md) for fields, error handling,
+MCP preview-ID binding/recheck, and concurrency/validation limits.
+Coordinated with BPC MCP agent in chat `01a11e0d-8757-7a82-afe5-83d75874caea`.
+Local Node and UI5 tests pass; service ADT syntax check has only documentation
+warnings. HTTP syntax initially awaits the installed service's new public type.
+ABAP Unit execution and full backend validation require installation in SAP.

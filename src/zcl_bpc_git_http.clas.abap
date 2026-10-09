@@ -22,6 +22,7 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
         workbooks    TYPE string VALUE '/workbooks',
         commit       TYPE string VALUE '/commit',
         restore      TYPE string VALUE '/restore',
+        restore_preview TYPE string VALUE '/restore-preview',
         history      TYPE string VALUE '/history',
         diff         TYPE string VALUE '/diff',
         transports   TYPE string VALUE '/transports',
@@ -90,6 +91,7 @@ CLASS zcl_bpc_git_http DEFINITION PUBLIC FINAL CREATE PUBLIC.
     "! optional user and token. Answers the result of each file.
     METHODS handle_restore
       IMPORTING io_service TYPE REF TO zcl_bpc_git_service
+                iv_preview TYPE abap_bool DEFAULT abap_false
       RAISING cx_uj_static_check.
     METHODS handle_history
       IMPORTING io_service TYPE REF TO zcl_bpc_git_service
@@ -205,6 +207,10 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
           WHEN c_resource-diff.
             IF require_method( c_method-post ) = abap_true.
               handle_diff( lo_service ).
+            ENDIF.
+          WHEN c_resource-restore_preview.
+            IF require_method( c_method-post ) = abap_true.
+              handle_restore( io_service = lo_service iv_preview = abap_true ).
             ENDIF.
           WHEN c_resource-restore.
             IF require_method( c_method-post ).
@@ -549,7 +555,8 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
                     iv_git_user = mo_server->request->get_form_field( 'user' )
           IMPORTING ev_error = lv_error
                     ev_commit = lv_commit
-                    es_timings = DATA(ls_timings) ).
+                    es_timings = DATA(ls_timings)
+                    et_results = DATA(lt_commit_results) ).
       CATCH zcx_abapgit_exception INTO DATA(lx_git).
         respond_git_error( ix_error = lx_git iv_with_login = lv_with_login ).
         RETURN.
@@ -559,8 +566,15 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
       respond_error( iv_code = 409 iv_reason = 'Conflict' iv_message = lv_error ).
       RETURN.
     ENDIF.
+    DATA lv_results_json TYPE string.
+    DATA lv_results_separator TYPE string.
+    LOOP AT lt_commit_results INTO DATA(ls_commit_result).
+      lv_results_json = lv_results_json && lv_results_separator && `{"path":` && quote( ls_commit_result-path ) &&
+        `,"ok":true,"message":""}`.
+      lv_results_separator = ','.
+    ENDLOOP.
     respond( iv_code = 200 iv_reason = 'OK' iv_json =
-      `{"commit":` && quote( lv_commit ) &&
+      `{"branch":` && quote( ls_config-branch ) && `,"results":[` && lv_results_json && `],"commit":` && quote( lv_commit ) &&
       `,"count":` && |{ lines( lt_paths ) }| &&
       `,"timings":{"bpcMs":` && |{ ls_timings-bpc_ms }| &&
       `,"gitMs":` && |{ ls_timings-git_ms }| &&
@@ -585,9 +599,10 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     DATA lt_results TYPE zcl_bpc_git_service=>ty_restore_results.
     DATA lt_entities TYPE zcl_bpc_git_transport=>ty_entities.
     DATA lv_request TYPE trkorr.
+    DATA ls_preview TYPE zcl_bpc_git_service=>ty_restore_preview.
 
     DATA(lv_expected) = read_field( iv_name = 'commit' iv_label = 'current commit'
-                                    iv_max_length = 40 iv_required = abap_false ).
+                                    iv_max_length = 40 iv_required = iv_preview ).
     DESCRIBE FIELD lv_request LENGTH DATA(lv_request_length) IN CHARACTER MODE.
     lv_request = to_upper( read_field( iv_name = 'transport' iv_label = 'transport request'
       iv_max_length = lv_request_length iv_required = abap_false ) ).
@@ -597,6 +612,14 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     IF lv_version IS NOT INITIAL AND ( strlen( lv_version ) <> 40 OR lv_version CN '0123456789abcdef' ).
       mv_invalid = abap_true.
       respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'Invalid history commit' ).
+    ENDIF.
+    IF iv_preview = abap_true AND ( strlen( lv_expected ) <> 40 OR to_lower( lv_expected ) CN '0123456789abcdef' ).
+      mv_invalid = abap_true.
+      respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'Invalid current commit' ).
+    ENDIF.
+    IF iv_preview = abap_true AND lv_request IS NOT INITIAL.
+      mv_invalid = abap_true.
+      respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'Preview does not accept a transport request' ).
     ENDIF.
     IF mv_invalid = abap_true.
       RETURN.
@@ -627,14 +650,44 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
                                              iv_expected_commit = lv_expected
                                              iv_version = lv_version
                                              iv_depth = lv_depth
+                                             iv_preview = iv_preview
                                    IMPORTING ev_error = lv_error
                                              et_results = lt_results
-                                             et_entities = lt_entities ).
+                                             et_entities = lt_entities
+                                             es_preview = ls_preview ).
       CATCH zcx_abapgit_exception INTO DATA(lx_git).
         respond_git_error( ix_error = lx_git iv_with_login = lv_with_login ).
         RETURN.
     ENDTRY.
 
+    IF iv_preview = abap_true.
+      DATA lv_preview_json TYPE string.
+      DATA lv_object_separator TYPE string.
+      LOOP AT ls_preview-objects INTO DATA(ls_object).
+        DATA(lv_files_json) = ``.
+        DATA(lv_file_separator) = ``.
+        LOOP AT ls_object-files INTO DATA(ls_file).
+          lv_files_json = lv_files_json && lv_file_separator &&
+            `{"path":` && quote( ls_file-path ) && `,"currentStatus":` && quote( ls_file-current_status ) &&
+            `,"status":` && quote( ls_file-status ) && `,"action":` && quote( ls_file-action ) &&
+            `,"inBpc":` && COND string( WHEN ls_file-in_bpc = abap_true THEN `true` ELSE `false` ) &&
+            `,"overwritesBpc":` && COND string( WHEN ls_file-overwrites_bpc = abap_true THEN `true` ELSE `false` ) &&
+            `,"sourceSha1":` && quote( ls_file-source_sha1 ) &&
+            `,"currentBpcSha1":` && quote( ls_file-current_bpc_sha1 ) &&
+            `,"validationError":` && quote( ls_file-validation_error ) && `}`.
+          lv_file_separator = ','.
+        ENDLOOP.
+        lv_preview_json = lv_preview_json && lv_object_separator && `{"path":` && quote( ls_object-path ) &&
+          `,"files":[` && lv_files_json && `]}`.
+        lv_object_separator = ','.
+      ENDLOOP.
+      respond( iv_code = 200 iv_reason = 'OK' iv_json =
+        `{"branch":` && quote( ls_preview-branch ) && `,"currentHead":` && quote( ls_preview-current_head ) &&
+        `,"sourceCommit":` && quote( ls_preview-source_commit ) &&
+        `,"canRestore":` && COND string( WHEN ls_preview-can_restore = abap_true AND lv_error IS INITIAL THEN `true` ELSE `false` ) &&
+        `,"validationError":` && quote( lv_error ) && `,"objects":[` && lv_preview_json && `]}` ).
+      RETURN.
+    ENDIF.
     IF lv_error IS NOT INITIAL.
       respond_error( iv_code = 409 iv_reason = 'Conflict' iv_message = lv_error ).
       RETURN.
@@ -648,7 +701,9 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
         `,"message":` && quote( ls_result-message ) && `}`.
       lv_separator = ','.
     ENDLOOP.
-    respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"results":[` && lv_json && `]` &&
+    respond( iv_code = 200 iv_reason = 'OK' iv_json = `{"branch":` && quote( ls_preview-branch ) &&
+      `,"currentHead":` && quote( ls_preview-current_head ) && `,"sourceCommit":` && quote( ls_preview-source_commit ) &&
+      `,"results":[` && lv_json && `]` &&
       COND string( WHEN lv_request IS NOT INITIAL THEN `,"transport":` && transport_json(
         iv_environment = lv_environment iv_request = lv_request it_results = lt_results it_entities = lt_entities ) ) &&
       `}` ).

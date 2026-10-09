@@ -175,7 +175,35 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
       EXPORTING ev_error TYPE string
                 ev_commit TYPE string
                 es_timings TYPE ty_commit_timings
+                et_results TYPE ty_restore_results
       RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
+    TYPES: BEGIN OF ty_preview_file,
+             path TYPE string,
+             current_status TYPE string,
+             status TYPE string,
+             action TYPE string,
+             in_bpc TYPE abap_bool,
+             overwrites_bpc TYPE abap_bool,
+             source_sha1 TYPE string,
+             current_bpc_sha1 TYPE string,
+             validation_error TYPE string,
+           END OF ty_preview_file,
+           ty_preview_files TYPE STANDARD TABLE OF ty_preview_file WITH DEFAULT KEY,
+           BEGIN OF ty_preview_object,
+             path TYPE string,
+             files TYPE ty_preview_files,
+           END OF ty_preview_object,
+           ty_preview_objects TYPE STANDARD TABLE OF ty_preview_object WITH DEFAULT KEY,
+           BEGIN OF ty_restore_preview,
+             branch TYPE string,
+             current_head TYPE string,
+             source_commit TYPE string,
+             can_restore TYPE abap_bool,
+             objects TYPE ty_preview_objects,
+           END OF ty_restore_preview.
+    CLASS-METHODS restore_action
+      IMPORTING is_file TYPE ty_workbook
+      RETURNING VALUE(rv_action) TYPE string.
     "! Writes the Git version of the given files into BPC (F5): creates or
     "! overwrites them, or deletes those deleted in Git, and records them as
     "! synced. Refuses the whole request, with ev_error, if the branch has moved
@@ -189,8 +217,10 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_expected_commit TYPE string
                 iv_version TYPE string OPTIONAL
                 iv_depth TYPE i DEFAULT 100
+                iv_preview TYPE abap_bool DEFAULT abap_false
       EXPORTING ev_error TYPE string
                 et_results TYPE ty_restore_results
+                es_preview TYPE ty_restore_preview
                 "! BPC transport entity of each restored object; path is the
                 "! result's (logical) path
                 et_entities TYPE zcl_bpc_git_transport=>ty_entities
@@ -889,6 +919,7 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD commit_workbooks.
+    CLEAR et_results.
     DATA lt_changes TYPE zcl_bpc_git_remote=>ty_changes.
     DATA lt_synced TYPE STANDARD TABLE OF zbpc_git_state WITH DEFAULT KEY.
     DATA lt_unsynced TYPE STANDARD TABLE OF uj_docname WITH DEFAULT KEY.
@@ -993,20 +1024,33 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
     GET RUN TIME FIELD lv_finished.
     es_timings-sync_ms = ( lv_finished - lv_phase ) / 1000.
     es_timings-total_ms = ( lv_finished - lv_started ) / 1000.
+    LOOP AT it_paths INTO DATA(lv_result_path).
+      DATA(lv_result_logical) = logical_path( iv_path = lv_result_path it_files = ls_overview-workbooks ).
+      IF NOT line_exists( et_results[ path = lv_result_logical ] ).
+        APPEND VALUE #( path = lv_result_logical ok = abap_true ) TO et_results.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD restore_files.
-    CLEAR: ev_error, et_results, et_entities.
+    CLEAR: ev_error, et_results, et_entities, es_preview.
     IF it_paths IS INITIAL.
       ev_error = 'Select at least one file'.
       RETURN.
     ENDIF.
 
     " Statuses as of now, from the head whose content is restored
-    DATA(ls_config) = get_config( iv_environment ).
+    DATA ls_config TYPE zbpc_git_repo.
+    DATA ls_overview TYPE ty_overview.
+    TEST-SEAM restore_overview.
+    ls_config = get_config( iv_environment ).
     selection_scope( EXPORTING it_paths = it_paths IMPORTING ev_kind = DATA(lv_scope_kind) ev_model = DATA(lv_scope_model) ev_dimension = DATA(lv_scope_dimension) ).
-    DATA(ls_overview) = get_overview( iv_environment = iv_environment io_remote = io_remote
+    ls_overview = get_overview( iv_environment = iv_environment io_remote = io_remote
       iv_individual = abap_true iv_kind = lv_scope_kind iv_model = lv_scope_model iv_dimension = lv_scope_dimension ).
+    END-TEST-SEAM.
+    es_preview-branch = ls_config-branch.
+    es_preview-current_head = ls_overview-commit.
+    es_preview-source_commit = COND #( WHEN iv_version IS INITIAL THEN ls_overview-commit ELSE iv_version ).
     IF ls_overview-branch_found = abap_false.
       ev_error = |Branch { ls_config-branch } does not exist in the repository.|.
       RETURN.
@@ -1071,20 +1115,25 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         APPEND ls_snapshot_file TO lt_snapshot_files.
       ENDLOOP.
       ls_overview-workbooks = lt_snapshot_files.
-      IF lv_operations = 0.
+      IF lv_operations = 0 AND iv_preview = abap_false.
         APPEND VALUE #( path = lv_history_path ok = abap_true ) TO et_results.
         RETURN.
       ENDIF.
     ENDIF.
 
     DATA lt_paths TYPE string_table.
-    expand_selection( EXPORTING it_paths = it_paths it_files = ls_overview-workbooks iv_restore = abap_true
-                       IMPORTING et_paths = lt_paths ev_error = ev_error ).
+    IF iv_version IS INITIAL OR lv_operations > 0.
+      expand_selection( EXPORTING it_paths = it_paths it_files = ls_overview-workbooks iv_restore = abap_true
+                         IMPORTING et_paths = lt_paths ev_error = ev_error ).
+    ENDIF.
     IF ev_error IS NOT INITIAL.
       RETURN.
     ENDIF.
     DATA(lt_groups) = group_files( ls_overview-workbooks ).
-    DATA(lo_files) = get_file_service( iv_environment ).
+    DATA lo_files TYPE REF TO cl_ujf_file_service_mgr.
+    TEST-SEAM restore_file_service.
+      lo_files = get_file_service( iv_environment ).
+    END-TEST-SEAM.
     IF line_exists( ls_overview-workbooks[ kind = c_kind-script ] ).
       LOOP AT lt_paths INTO DATA(lv_check_path).
         READ TABLE ls_overview-workbooks INTO DATA(ls_check) WITH KEY path = lv_check_path.
@@ -1093,6 +1142,50 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
           EXIT.
         ENDIF.
       ENDLOOP.
+    ENDIF.
+    IF iv_preview = abap_true.
+      es_preview-can_restore = abap_true.
+      LOOP AT it_paths INTO DATA(lv_preview_path).
+        DATA(lv_preview_logical) = logical_path( iv_path = lv_preview_path it_files = ls_overview-workbooks ).
+        IF line_exists( es_preview-objects[ path = lv_preview_logical ] ).
+          CONTINUE.
+        ENDIF.
+        DATA(ls_preview_object) = VALUE ty_preview_object( path = lv_preview_logical ).
+        READ TABLE lt_groups INTO DATA(ls_preview_group) WITH KEY path = lv_preview_logical.
+        LOOP AT ls_preview_group-members INTO DATA(lv_preview_member).
+          READ TABLE ls_overview-workbooks INTO DATA(ls_preview_source) WITH KEY path = lv_preview_member.
+          DATA(ls_preview_file) = VALUE ty_preview_file( path = lv_preview_member
+            status = ls_preview_source-status action = restore_action( ls_preview_source )
+            in_bpc = ls_preview_source-in_bpc source_sha1 = ls_preview_source-git_sha1 ).
+          READ TABLE lt_head_files INTO DATA(ls_preview_current) WITH KEY path = lv_preview_member.
+          IF sy-subrc = 0.
+            ls_preview_file-current_status = ls_preview_current-status.
+          ENDIF.
+          ls_preview_file-overwrites_bpc = xsdbool( ls_preview_file-in_bpc = abap_true
+            AND ( ls_preview_file-action = 'UPDATE' OR ls_preview_file-action = 'DELETE' ) ).
+          TRY.
+              IF ls_preview_source-in_bpc = abap_true.
+                DATA(lv_preview_content) = ls_preview_source-content.
+                IF ls_preview_source-generated = abap_false.
+                  lo_files->get_document( EXPORTING i_docname = ls_preview_source-docname i_retzip = abap_false
+                    IMPORTING e_document_content = lv_preview_content ).
+                  IF ls_preview_file-action <> 'UNCHANGED' AND lo_files->check_document_lock( ls_preview_source-docname ) = abap_true.
+                    ls_preview_file-validation_error = |{ lv_preview_member } is locked in BPC. Close it and try again.|.
+                  ENDIF.
+                ENDIF.
+                ls_preview_file-current_bpc_sha1 = zcl_bpc_git_remote=>blob_sha1( lv_preview_content ).
+              ENDIF.
+            CATCH cx_root INTO DATA(lx_preview).
+              ls_preview_file-validation_error = lx_preview->get_text( ).
+          ENDTRY.
+          IF ls_preview_file-validation_error IS NOT INITIAL.
+            es_preview-can_restore = abap_false.
+          ENDIF.
+          APPEND ls_preview_file TO ls_preview_object-files.
+        ENDLOOP.
+        APPEND ls_preview_object TO es_preview-objects.
+      ENDLOOP.
+      RETURN. " Read-only boundary: no restore, sync state, dimension processing or transport.
     ENDIF.
     DATA lt_done TYPE string_table.
     LOOP AT it_paths INTO DATA(lv_path).
@@ -1457,6 +1550,12 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       RETURN.
     ENDLOOP.
     rv_error = lv_fm_error.
+  ENDMETHOD.
+
+  METHOD restore_action.
+    rv_action = COND #( WHEN is_file-status = c_status-unchanged THEN 'UNCHANGED'
+      WHEN is_file-status = c_status-deleted_git THEN 'DELETE'
+      WHEN is_file-in_bpc = abap_true THEN 'UPDATE' ELSE 'CREATE' ).
   ENDMETHOD.
 
   METHOD is_restorable.

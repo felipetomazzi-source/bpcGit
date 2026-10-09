@@ -962,3 +962,17 @@ Added request-local read_branch phase timings to load and commit API responses a
 ## 0.19.5 Full snapshot reuse
 
 ADT available again: installed ZCL_ABAPGIT_GIT_TRANSPORT/PORCELAIN/PACK inspected read-only. Decoder uses decompression/recompression and possible ABAP zlib fallback; no runtime attribution yet. Added volatile full pull snapshots in INDX(bf), validated against fresh branch advertisement before reuse. Existing metadata cache remains independent. Payload cap 64 MiB. Push result new_objects/new_files seeds new head. ABAP Unit regression covers same-head reuse, changed-head fallback, restored blob data and access denial. Cold pulls still expensive. Current ADT exposes reads only, so SAP syntax/unit validation and deployment require separate available tooling.
+
+## Restore preview API (0.19.6)
+
+Implemented POST `/restore-preview` using the same service planning path as restore.
+It returns logical objects and companion files, create/update/delete/unchanged
+operations, overwrite flags, current BPC fingerprints and validation errors,
+without saving BPC or sync state. Restore responses add branch/head/source metadata;
+commit success responses add service-confirmed logical outcomes and branch.
+See [the complete contract](RESTORE_PREVIEW_API.md) for fields, error handling,
+MCP preview-ID binding/recheck, and concurrency/validation limits.
+Coordinated with BPC MCP agent in chat `01a11e0d-8757-7a82-afe5-83d75874caea`.
+Local Node and UI5 tests pass; service ADT syntax check has only documentation
+warnings. HTTP syntax initially awaits the installed service's new public type.
+ABAP Unit execution and full backend validation require installation in SAP.

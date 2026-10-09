@@ -4,7 +4,7 @@ Version control for SAP BPC 10.1 (NW) content in Git: EPM workbooks, logic
 scripts, transformation and conversion files, Data Manager packages and
 package links, security definitions, BPF template designs and dimension members.
 The app is a UI5 BSP application, installed with abapGit into package `ZBPC_GIT`.
-Current version: **0.19.5**. Target runtime: ABAP 7.52 and UI5 1.52.
+Current version: **0.19.6**. Target runtime: ABAP 7.52 and UI5 1.52.
 
 Choose an object type and optional model, then **Load**. Select objects to
 commit, restore or inspect their history. EPM reports and input schedules have
@@ -472,3 +472,6 @@ Dimension members display `ID - description`, using the current BPC working-copy
 Git read diagnostics: `gitRefsMs` measures branch discovery; `gitPullMs` measures the full abapGit pull (network, pack decoding and tree extraction combined); `gitFilesMs` measures file indexing; `gitLfsMs` measures LFS indexing; `gitCacheMs` measures metadata cache and scope handling. These are request-local numeric timings, with no credentials or paths. Cached loads can have zero pull time; commits require a verified full snapshot, fetched on a cache miss.
 
 Full Git snapshots are now cached in volatile SAP shared memory per repository, branch, root, SAP client/user and Git username. Each request verifies current read access and branch head before reuse. Changed heads and evictions fall back to a full pull. Successful pushes seed the new snapshot. Uncompressed object/file payloads above 64 MiB are not cached. A first uncached commit can still be slow; this does not eliminate cold pulls.
+
+The read-only restore-preview API supports MCP integration with companion plans,
+current BPC fingerprints and stale-head validation. See [API contract](docs/RESTORE_PREVIEW_API.md).

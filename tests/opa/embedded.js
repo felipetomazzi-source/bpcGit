@@ -161,6 +161,26 @@ sap.ui.getCore().attachInit(function () {
       }
       check();
     });
+    QUnit.test('Read-only restore preview API contract', function (assert) {
+      var done = assert.async();
+      function preview(head) {
+        return jQuery.ajax({ url: '/sap/bc/zbpc_git/restore-preview', type: 'POST', dataType: 'json',
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          data: { environment: 'TEST', commit: head, paths: 'PLAN/EXCEL/REPORTS/REPORT.XLSX' } });
+      }
+      preview('a'.repeat(40)).then(function (plan) {
+        assert.strictEqual(plan.canRestore, true, 'Valid plan can be reviewed');
+        assert.strictEqual(plan.objects[0].files.length, 2, 'Workbook companion included');
+        assert.strictEqual(plan.objects[0].files[0].overwritesBpc, true, 'Overwrite is explicit');
+        assert.strictEqual(plan.objects[0].files[1].action, 'DELETE', 'Companion deletion is explicit');
+        assert.strictEqual(plan.objects[0].files[0].currentBpcSha1.length, 40, 'Local fingerprint available');
+        return preview('e'.repeat(40));
+      }).then(function (plan) {
+        assert.strictEqual(plan.canRestore, false, 'Stale head blocks preview');
+        assert.strictEqual(plan.objects.length, 0, 'Invalid plan offers no executable objects');
+        done();
+      }, function (error) { assert.ok(false, String(error)); done(); });
+    });
     QUnit.start();
   });
 });
