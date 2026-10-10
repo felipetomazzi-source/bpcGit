@@ -1081,3 +1081,11 @@ into SAP using ADT abapGit repo `000000000006`, main, transport `NPLK900106`.
 Both backend classes pass ADT syntax checks (service has documentation warnings).
 All four new harmless service ABAP Unit tests pass in SAP. No BPC data restore,
 commit, transport recording, or live browser test was performed.
+
+## Bounded-output API test branch
+
+`codex/bounded-read-api` adds optional `/workbooks changedOnly=true` and
+`/diff mode=summary`, preserving omitted-parameter behavior. Read-only output
+filtering; no scan-cost guarantee, pagination, new write endpoints or BPC mutations.
+See [bounded read contract](BOUNDED_READ_API.md). Kept separate from Notebook
+versioning and main; no SAP deployment for this branch.

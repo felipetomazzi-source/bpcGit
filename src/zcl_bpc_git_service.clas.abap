@@ -105,6 +105,7 @@ CLASS zcl_bpc_git_service DEFINITION PUBLIC FINAL CREATE PUBLIC.
            END OF ty_diff.
     METHODS get_diff
       IMPORTING iv_environment TYPE uj_appset_id io_remote TYPE REF TO zcl_bpc_git_remote iv_path TYPE string
+                iv_summary TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rs_diff) TYPE ty_diff
       RAISING cx_uj_no_auth cx_uj_static_check zcx_abapgit_exception.
     METHODS available_dimensions IMPORTING iv_environment TYPE uj_appset_id
@@ -862,20 +863,24 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
         AND lv_kind <> c_kind-package AND lv_kind <> c_kind-link.
       zcx_abapgit_exception=>raise( 'Diff is available for logic scripts, transformations, conversions, packages and package links' ).
     ENDIF.
-    DATA(lv_model) = get_model( iv_path ).
-    DATA(lt_models) = available_models( iv_environment ).
-    IF lv_model IS INITIAL OR NOT line_exists( lt_models[ table_line = CONV uj_appl_id( lv_model ) ] ).
-      RAISE EXCEPTION TYPE cx_uj_no_auth.
-    ENDIF.
-    DATA(lt_bpc) = list_workbooks( iv_environment = iv_environment iv_kind = lv_kind iv_model = lv_model ).
-    DATA(lt_paths) = history_paths( iv_path ).
-    DATA(ls_config) = get_config( iv_environment ).
-    DATA(ls_branch) = io_remote->read_paths( iv_branch = ls_config-branch it_paths = lt_paths ).
+    TEST-SEAM diff_sources.
+      DATA(lv_model) = get_model( iv_path ).
+      DATA(lt_models) = available_models( iv_environment ).
+      IF lv_model IS INITIAL OR NOT line_exists( lt_models[ table_line = CONV uj_appl_id( lv_model ) ] ).
+        RAISE EXCEPTION TYPE cx_uj_no_auth.
+      ENDIF.
+      DATA(lt_bpc) = list_workbooks( iv_environment = iv_environment iv_kind = lv_kind iv_model = lv_model ).
+      DATA(lt_paths) = history_paths( iv_path ).
+      DATA(ls_config) = get_config( iv_environment ).
+      DATA(ls_branch) = io_remote->read_paths( iv_branch = ls_config-branch it_paths = lt_paths ).
+    END-TEST-SEAM.
     IF NOT line_exists( lt_bpc[ path = iv_path ] ) AND NOT line_exists( ls_branch-files[ path = iv_path ] ).
       zcx_abapgit_exception=>raise( 'The selected item is no longer listed; reload the overview' ).
     ENDIF.
     rs_diff-head = ls_branch-commit.
-    DATA(lo_files) = get_file_service( iv_environment ).
+    TEST-SEAM diff_file_service.
+      DATA(lo_files) = get_file_service( iv_environment ).
+    END-TEST-SEAM.
     LOOP AT lt_paths INTO DATA(lv_path).
       DATA(ls_part) = VALUE ty_diff_part( path = lv_path ).
       DATA lv_bpc TYPE xstring.
@@ -893,7 +898,9 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
       ENDIF.
       ls_part-in_git = xsdbool( line_exists( ls_branch-files[ path = lv_path ] ) ).
       IF ls_part-in_git = abap_true.
-        lv_git = io_remote->get_content( lv_path ).
+        TEST-SEAM diff_git_content.
+          lv_git = io_remote->get_content( lv_path ).
+        END-TEST-SEAM.
       ENDIF.
       ls_part-bpc_size = xstrlen( lv_bpc ).
       ls_part-git_size = xstrlen( lv_git ).
@@ -908,6 +915,9 @@ CLASS zcl_bpc_git_service IMPLEMENTATION.
             CLEAR: ls_part-bpc_text, ls_part-git_text.
             ls_part-message = lx_text->get_text( ).
         ENDTRY.
+        IF iv_summary = abap_true.
+          CLEAR: ls_part-bpc_text, ls_part-git_text.
+        ENDIF.
         IF ls_part-in_bpc = abap_false AND ls_part-in_git = abap_false.
           ls_part-message = 'Companion definition is missing in both BPC and Git'.
         ENDIF.

@@ -181,6 +181,41 @@ sap.ui.getCore().attachInit(function () {
         done();
       }, function (error) { assert.ok(false, String(error)); done(); });
     });
+    QUnit.test('Bounded status and diff read contracts', function (assert) {
+      var done = assert.async();
+      function read(resource, data) {
+        return new Promise(function (resolve, reject) {
+          jQuery.ajax({ url: '/sap/bc/zbpc_git/' + resource, type: 'POST', dataType: 'json',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }, data: data }).then(resolve, reject);
+        });
+      }
+      var scope = { environment: 'TEST', kind: 'DIMMEMBER', dimension: 'ACCOUNT', paths: 'DIMENSIONS/ACCOUNT/MEMBERS/CASH%20TOTAL.xml' };
+      read('workbooks', scope).then(function (result) {
+        assert.strictEqual(result.workbooks.length, 1, 'Omitted changedOnly preserves unchanged rows');
+        scope.changedOnly = 'true';
+        return read('workbooks', scope);
+      }).then(function (result) {
+        assert.strictEqual(result.workbooks.length, 0, 'Changed-only selection excludes unchanged rows');
+        assert.strictEqual(result.commit.length, 40, 'Empty filtered response retains head metadata');
+        return read('diff', { environment: 'TEST', path: 'ADMINAPP/PLAN/TEST.LGF' });
+      }).then(function (result) {
+        assert.ok(typeof result.parts[0].bpcText === 'string', 'Omitted mode preserves full text');
+        return read('diff', { environment: 'TEST', path: 'ADMINAPP/PLAN/TEST.LGF', mode: 'summary' });
+      }).then(function (result) {
+        assert.strictEqual(result.parts[0].changed, true, 'Summary retains comparison result');
+        assert.strictEqual(result.parts[0].bpcSize, 6, 'Summary retains byte size');
+        assert.strictEqual(Object.prototype.hasOwnProperty.call(result.parts[0], 'bpcText'), false, 'Summary omits BPC text');
+        assert.strictEqual(Object.prototype.hasOwnProperty.call(result.parts[0], 'gitText'), false, 'Summary omits Git text');
+        return read('diff', { environment: 'TEST', path: 'ADMINAPP/PLAN/TEST.LGF', mode: 'invalid' }).then(
+          function () { assert.ok(false, 'Invalid mode rejected'); },
+          function (xhr) { assert.strictEqual(xhr.status, 400, 'Invalid mode rejected'); });
+      }).then(function () {
+        scope.changedOnly = 'yes';
+        return read('workbooks', scope).then(
+          function () { assert.ok(false, 'Invalid changedOnly rejected'); },
+          function (xhr) { assert.strictEqual(xhr.status, 400, 'Invalid changedOnly rejected'); });
+      }).then(done, function (error) { assert.ok(false, String(error)); done(); });
+    });
     QUnit.start();
   });
 });

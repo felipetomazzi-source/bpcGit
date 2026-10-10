@@ -60,11 +60,36 @@ http.createServer(async (req, res) => {
       });
       return;
     }
+    if (resource === 'diff' && req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        const params = new URLSearchParams(body);
+        const mode = params.get('mode') || 'full';
+        if (!['full', 'summary'].includes(mode)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: { message: 'mode must be full or summary' } }));
+          return;
+        }
+        const part = { path: params.get('path'), inBpc: true, inGit: true, changed: true,
+          textAvailable: true, message: '', bpcSize: 6, gitSize: 6 };
+        if (mode === 'full') { part.bpcText = '*NEW\r\n'; part.gitText = '*OLD\r\n'; }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ head: 'a'.repeat(40), parts: [part] }));
+      });
+      return;
+    }
     if (resource === 'workbooks' && req.method === 'POST') {
       let body = '';
       req.on('data', chunk => { body += chunk; });
       req.on('end', () => {
         const params = new URLSearchParams(body);
+        const changedOnly = params.get('changedOnly') || 'false';
+        if (!['true', 'false'].includes(changedOnly)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: { message: 'changedOnly must be true or false' } }));
+          return;
+        }
         if (params.get('kind') !== 'DIMMEMBER' || params.get('dimension') !== 'ACCOUNT' || params.get('model')) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: { message: 'Unexpected member load scope' } }));
@@ -72,7 +97,7 @@ http.createServer(async (req, res) => {
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ branch: 'main', branchFound: true, commit: (params.get('paths') ? 'b' : 'a').repeat(40), timings: { bpcMs: 10, gitMs: 20, gitRefsMs: 4, gitPullMs: 12, gitFilesMs: 2, gitLfsMs: 1, gitCacheMs: 1, compareMs: 5 },
-          workbooks: [{ path: 'DIMENSIONS/ACCOUNT/MEMBERS/CASH%20TOTAL.xml', kind: 'DIMMEMBER',
+          workbooks: (changedOnly === 'true' && params.get('paths')) ? [] : [{ path: 'DIMENSIONS/ACCOUNT/MEMBERS/CASH%20TOTAL.xml', kind: 'DIMMEMBER',
             model: '', team: '', status: params.get('paths') ? 'UNCHANGED' : 'MODIFIED_BPC', memberDescription: 'Cash total', generated: true }] }));
       });
       return;

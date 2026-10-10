@@ -475,3 +475,6 @@ Full Git snapshots are now cached in volatile SAP shared memory per repository, 
 
 The read-only restore-preview API supports MCP integration with companion plans,
 current BPC fingerprints and stale-head validation. See [API contract](docs/RESTORE_PREVIEW_API.md).
+
+Read-only API extensions under test on `codex/bounded-read-api`: changed-only
+status output and diff summaries. See [request/response contract](docs/BOUNDED_READ_API.md).

@@ -442,7 +442,13 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     DATA(lv_kind) = read_field( iv_name = 'kind' iv_label = 'Object type' iv_max_length = 20 iv_required = abap_false ).
     DATA(lv_model) = read_field( iv_name = 'model' iv_label = 'Model' iv_max_length = 20 iv_required = abap_false ).
     DATA(lv_dimension) = read_field( iv_name = 'dimension' iv_label = 'Dimension' iv_max_length = 20 iv_required = abap_false ).
+    DATA(lv_changed_only) = read_field( iv_name = 'changedOnly' iv_label = 'Changed only'
+      iv_max_length = 5 iv_required = abap_false ).
     IF mv_invalid = abap_true.
+      RETURN.
+    ENDIF.
+    IF lv_changed_only IS NOT INITIAL AND lv_changed_only <> 'true' AND lv_changed_only <> 'false'.
+      respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'changedOnly must be true or false' ).
       RETURN.
     ENDIF.
     IF lv_kind IS NOT INITIAL AND lv_kind <> 'WORKBOOK' AND lv_kind <> 'SCRIPT'
@@ -487,6 +493,10 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
         respond_git_error( ix_error = lx_git iv_with_login = lv_with_login ).
         RETURN.
     ENDTRY.
+
+    IF lv_changed_only = 'true'.
+      DELETE ls_overview-workbooks WHERE status = zcl_bpc_git_service=>c_status-unchanged.
+    ENDIF.
 
     DATA lv_json TYPE string.
     DATA lv_separator TYPE string.
@@ -860,7 +870,13 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
     DATA lo_remote TYPE REF TO zcl_bpc_git_remote.
     DATA lv_with_login TYPE abap_bool.
     DATA(lv_path) = read_field( iv_name = 'path' iv_label = 'file path' iv_max_length = 255 ).
+    DATA(lv_mode) = read_field( iv_name = 'mode' iv_label = 'Diff mode'
+      iv_max_length = 7 iv_required = abap_false ).
     IF mv_invalid = abap_true.
+      RETURN.
+    ENDIF.
+    IF lv_mode IS NOT INITIAL AND lv_mode <> 'summary' AND lv_mode <> 'full'.
+      respond_error( iv_code = 400 iv_reason = 'Bad Request' iv_message = 'mode must be full or summary' ).
       RETURN.
     ENDIF.
     TRY.
@@ -870,7 +886,8 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
         IF lo_remote IS NOT BOUND.
           RETURN.
         ENDIF.
-        DATA(ls_diff) = io_service->get_diff( iv_environment = lv_environment io_remote = lo_remote iv_path = lv_path ).
+        DATA(ls_diff) = io_service->get_diff( iv_environment = lv_environment io_remote = lo_remote iv_path = lv_path
+          iv_summary = xsdbool( lv_mode = 'summary' ) ).
       CATCH zcx_abapgit_exception INTO DATA(lx_git).
         respond_git_error( ix_error = lx_git iv_with_login = lv_with_login ).
         RETURN.
@@ -884,7 +901,8 @@ CLASS zcl_bpc_git_http IMPLEMENTATION.
         `,"changed":` && COND string( WHEN ls_part-changed = abap_true THEN `true` ELSE `false` ) &&
         `,"textAvailable":` && COND string( WHEN ls_part-text_available = abap_true THEN `true` ELSE `false` ) &&
         `,"message":` && quote( ls_part-message ) &&
-        `,"bpcText":` && quote( ls_part-bpc_text ) && `,"gitText":` && quote( ls_part-git_text ) &&
+        COND string( WHEN lv_mode <> 'summary'
+          THEN `,"bpcText":` && quote( ls_part-bpc_text ) && `,"gitText":` && quote( ls_part-git_text ) ) &&
         `,"bpcSize":` && CONV string( ls_part-bpc_size ) && `,"gitSize":` && CONV string( ls_part-git_size ) && `}`.
       lv_separator = ','.
     ENDLOOP.

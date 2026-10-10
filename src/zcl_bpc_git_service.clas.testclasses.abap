@@ -91,3 +91,36 @@ CLASS ltcl_restore_preview IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = preview-current_head exp = repeat( val = 'b' occ = 40 ) ).
   ENDMETHOD.
 ENDCLASS.
+
+CLASS ltcl_diff_summary DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
+  PRIVATE SECTION.
+    METHODS summary_preserves_comparison FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+
+CLASS ltcl_diff_summary IMPLEMENTATION.
+  METHOD summary_preserves_comparison.
+    TEST-INJECTION diff_sources.
+      lt_bpc = VALUE #( ( path = iv_path generated = abap_true content = '4142' ) ).
+      lt_paths = VALUE #( ( iv_path ) ).
+      ls_branch = VALUE #( commit = repeat( val = 'a' occ = 40 ) files = VALUE #( ( path = iv_path ) ) ).
+    END-TEST-INJECTION.
+    TEST-INJECTION diff_git_content.
+      lv_git = '4143'.
+    END-TEST-INJECTION.
+    TEST-INJECTION diff_file_service.
+      CLEAR lo_files.
+    END-TEST-INJECTION.
+    DATA(service) = NEW zcl_bpc_git_service( ).
+    DATA remote TYPE REF TO zcl_bpc_git_remote.
+    DATA(full) = service->get_diff( iv_environment = 'TEST' io_remote = remote iv_path = 'ADMINAPP/PLAN/TEST.LGF' ).
+    DATA(summary) = service->get_diff( iv_environment = 'TEST' io_remote = remote
+      iv_path = 'ADMINAPP/PLAN/TEST.LGF' iv_summary = abap_true ).
+    cl_abap_unit_assert=>assert_equals( act = full-parts[ 1 ]-bpc_text exp = 'AB' ).
+    cl_abap_unit_assert=>assert_equals( act = full-parts[ 1 ]-git_text exp = 'AC' ).
+    cl_abap_unit_assert=>assert_initial( summary-parts[ 1 ]-bpc_text ).
+    cl_abap_unit_assert=>assert_initial( summary-parts[ 1 ]-git_text ).
+    CLEAR: full-parts[ 1 ]-bpc_text, full-parts[ 1 ]-git_text.
+    cl_abap_unit_assert=>assert_equals( act = summary exp = full ).
+    cl_abap_unit_assert=>assert_equals( act = summary-parts[ 1 ]-changed exp = abap_true ).
+  ENDMETHOD.
+ENDCLASS.
